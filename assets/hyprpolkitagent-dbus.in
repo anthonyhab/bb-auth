@@ -1,4 +1,0 @@
-[D-BUS Service]
-Name=org.hyprland.hyprpolkitagent
-Exec=@LIBEXECDIR@/hyprpolkitagent
-SystemdService=hyprpolkitagent.service
