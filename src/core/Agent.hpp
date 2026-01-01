@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QPointer>
 #include <QQueue>
 #include <QString>
 
@@ -17,10 +18,9 @@
 
 class CAgent {
   public:
-    CAgent();
-    ~CAgent();
+    CAgent()  = default;
+    ~CAgent() = default;
 
-    void resetAuthState();
     bool start(QCoreApplication& app, const QString& socketPath);
     void initAuthPrompt();
     void enqueueRequest();
@@ -30,10 +30,6 @@ class CAgent {
     bool handleCancel(const QString& cookie);
 
   private:
-    struct {
-        bool authing = false;
-    } authState;
-
     // Keyring request tracking
     struct KeyringRequest {
         QString       cookie;
@@ -42,7 +38,7 @@ class CAgent {
         QString       description;
         bool          passwordNew  = false;
         bool          confirmOnly  = false;
-        QLocalSocket* replySocket  = nullptr;
+        QPointer<QLocalSocket> replySocket;
     };
 
     QHash<QString, KeyringRequest> pendingKeyringRequests;
@@ -57,14 +53,15 @@ class CAgent {
 
     void        setupIpcServer();
     bool        checkFingerprintAvailable();
-    void        handleSocket(QLocalSocket* socket, const QByteArray& data);
+    void        handleSocketLine(QLocalSocket* socket, const QByteArray& line);
+    void        sendJson(QLocalSocket* socket, const QJsonObject& obj, bool disconnect = true);
     void        enqueueEvent(const QJsonObject& event);
     QJsonObject buildRequestEvent() const;
     QJsonObject buildKeyringRequestEvent(const KeyringRequest& req) const;
+    void        cleanupKeyringRequestsForSocket(QLocalSocket* socket);
 
     // Keyring request handlers
-    void handleKeyringRequest(QLocalSocket* socket, const QByteArray& payload);
-    void handleKeyringConfirm(QLocalSocket* socket, const QByteArray& payload);
+    void handleKeyringRequest(QLocalSocket* socket, const QJsonObject& obj);
     void respondToKeyringRequest(const QString& cookie, const QString& password);
     void cancelKeyringRequest(const QString& cookie);
 

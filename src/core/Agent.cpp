@@ -6,20 +6,13 @@
 #include <QDBusReply>
 #include <QJsonDocument>
 #include <QStandardPaths>
+#include <QStringList>
 #ifdef signals
 #undef signals
 #endif
 #include <polkitagent/polkitagent.h>
 
 #include "Agent.hpp"
-
-CAgent::CAgent() {
-    ;
-}
-
-CAgent::~CAgent() {
-    ;
-}
 
 bool CAgent::start(QCoreApplication& app, const QString& socketPath) {
     sessionSubject = std::make_shared<PolkitQt1::UnixSessionSubject>(getpid());
@@ -77,23 +70,13 @@ bool CAgent::checkFingerprintAvailable() {
     return !fingersReply.value().isEmpty();
 }
 
-void CAgent::resetAuthState() {
-    if (authState.authing) {
-        authState.authing = false;
-    }
-}
-
 void CAgent::initAuthPrompt() {
-    resetAuthState();
-
     if (!listener.session.inProgress) {
         std::print(stderr, "INTERNAL ERROR: Auth prompt requested but session isn't in progress\n");
         return;
     }
 
     std::print("Auth prompt requested\n");
-
-    authState.authing = true;
     // The actual request is emitted when the session provides a prompt.
 }
 
@@ -194,10 +177,17 @@ void CAgent::setupIpcServer() {
         while (ipcServer->hasPendingConnections()) {
             auto* socket = ipcServer->nextPendingConnection();
             QObject::connect(socket, &QLocalSocket::readyRead, [this, socket]() {
-                const QByteArray data = socket->readAll();
-                handleSocket(socket, data);
+                while (socket->canReadLine()) {
+                    QByteArray line = socket->readLine().trimmed();
+                    if (line.isEmpty())
+                        continue;
+                    handleSocketLine(socket, line);
+                }
             });
-            QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
+            QObject::connect(socket, &QLocalSocket::disconnected, [this, socket]() {
+                cleanupKeyringRequestsForSocket(socket);
+                socket->deleteLater();
+            });
         }
     });
 
@@ -211,118 +201,108 @@ void CAgent::setupIpcServer() {
     std::print("IPC listening on {}\n", ipcSocketPath.toStdString());
 }
 
-void CAgent::handleSocket(QLocalSocket* socket, const QByteArray& data) {
-    const QList<QByteArray> lines   = data.split('\n');
-    const QString           command = QString::fromUtf8(lines.value(0)).trimmed();
-    const QString           payload = QString::fromUtf8(lines.value(1)).trimmed();
+void CAgent::handleSocketLine(QLocalSocket* socket, const QByteArray& line) {
+    QJsonParseError parseError;
+    QJsonDocument   doc = QJsonDocument::fromJson(line, &parseError);
 
-    if (command == "PING") {
-        socket->write("PONG\n");
-        socket->flush();
-        socket->disconnectFromServer();
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        std::print(stderr, "IPC JSON parse error: {}\n", parseError.errorString().toStdString());
+        sendJson(socket, QJsonObject{{"type", "error"}, {"error", "invalid_json"}});
         return;
     }
 
-    if (command == "NEXT") {
+    const QJsonObject obj  = doc.object();
+    const QString     type = obj.value("type").toString();
+
+    if (type == "ping") {
+        sendJson(socket, QJsonObject{{"type", "pong"}});
+        return;
+    }
+
+    if (type == "next") {
         if (eventQueue.isEmpty()) {
-            socket->write("\n");
+            sendJson(socket, QJsonObject{{"type", "empty"}});
         } else {
             const auto event = eventQueue.dequeue();
-            const auto json  = QJsonDocument(event).toJson(QJsonDocument::Compact);
-            socket->write(json + "\n");
+            sendJson(socket, event);
         }
-        socket->flush();
-        socket->disconnectFromServer();
         return;
     }
 
-    // Handle keyring password requests
-    if (command == "KEYRING_REQUEST") {
-        handleKeyringRequest(socket, payload.toUtf8());
-        // Don't disconnect - keep socket open for response
+    if (type == "keyring_request") {
+        handleKeyringRequest(socket, obj);
+        // Keep socket open for response.
         return;
     }
 
-    // Handle keyring confirm requests
-    if (command == "KEYRING_CONFIRM") {
-        handleKeyringConfirm(socket, payload.toUtf8());
-        // Don't disconnect - keep socket open for response
-        return;
-    }
+    if (type == "respond") {
+        const QString cookie   = obj.value("id").toString();
+        const QString response = obj.value("response").toString();
 
-    if (command.startsWith("RESPOND ")) {
-        const QString cookie = command.mid(QString("RESPOND ").length()).trimmed();
-
-        // Check if this is a keyring request first
-        if (pendingKeyringRequests.contains(cookie)) {
-            respondToKeyringRequest(cookie, payload);
-            socket->write("OK\n");
-            socket->flush();
-            socket->disconnectFromServer();
+        if (cookie.isEmpty()) {
+            sendJson(socket, QJsonObject{{"type", "error"}, {"error", "missing_id"}});
             return;
         }
 
-        // Otherwise handle as polkit
-        const bool ok = handleRespond(cookie, payload);
-        socket->write(ok ? "OK\n" : "ERROR\n");
-        socket->flush();
-        socket->disconnectFromServer();
+        if (pendingKeyringRequests.contains(cookie)) {
+            respondToKeyringRequest(cookie, response);
+            sendJson(socket, QJsonObject{{"type", "ok"}});
+            return;
+        }
+
+        const bool ok = handleRespond(cookie, response);
+        sendJson(socket, ok ? QJsonObject{{"type", "ok"}} : QJsonObject{{"type", "error"}, {"error", "invalid_cookie"}});
         return;
     }
 
-    if (command.startsWith("CANCEL ")) {
-        const QString cookie = command.mid(QString("CANCEL ").length()).trimmed();
+    if (type == "cancel") {
+        const QString cookie = obj.value("id").toString();
 
-        // Check if this is a keyring request first
+        if (cookie.isEmpty()) {
+            sendJson(socket, QJsonObject{{"type", "error"}, {"error", "missing_id"}});
+            return;
+        }
+
         if (pendingKeyringRequests.contains(cookie)) {
             cancelKeyringRequest(cookie);
-            socket->write("OK\n");
-            socket->flush();
-            socket->disconnectFromServer();
+            sendJson(socket, QJsonObject{{"type", "ok"}});
             return;
         }
 
-        // Otherwise handle as polkit
         const bool ok = handleCancel(cookie);
-        socket->write(ok ? "OK\n" : "ERROR\n");
-        socket->flush();
-        socket->disconnectFromServer();
+        sendJson(socket, ok ? QJsonObject{{"type", "ok"}} : QJsonObject{{"type", "error"}, {"error", "invalid_cookie"}});
         return;
     }
 
-    socket->write("ERROR\n");
-    socket->flush();
-    socket->disconnectFromServer();
+    sendJson(socket, QJsonObject{{"type", "error"}, {"error", "unknown_command"}});
 }
 
-void CAgent::handleKeyringRequest(QLocalSocket* socket, const QByteArray& payload) {
-    QJsonParseError parseError;
-    QJsonDocument   doc = QJsonDocument::fromJson(payload, &parseError);
-
-    if (parseError.error != QJsonParseError::NoError) {
-        std::print(stderr, "Keyring request JSON parse error: {}\n", parseError.errorString().toStdString());
-        socket->write("ERROR\n");
-        socket->flush();
-        socket->disconnectFromServer();
+void CAgent::sendJson(QLocalSocket* socket, const QJsonObject& obj, bool disconnect) {
+    if (!socket || socket->state() != QLocalSocket::ConnectedState)
         return;
-    }
 
-    QJsonObject obj = doc.object();
+    const auto json = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    socket->write(json);
+    socket->write("\n");
+    socket->flush();
 
+    if (disconnect)
+        socket->disconnectFromServer();
+}
+
+void CAgent::handleKeyringRequest(QLocalSocket* socket, const QJsonObject& obj) {
     KeyringRequest req;
-    req.cookie      = obj["cookie"].toString();
-    req.title       = obj["title"].toString();
-    req.message     = obj["message"].toString();
-    req.description = obj["description"].toString();
-    req.passwordNew = obj["password_new"].toBool(false);
-    req.confirmOnly = false;
+    req.cookie      = obj.value("cookie").toString();
+    req.title       = obj.value("title").toString();
+    req.message     = obj.value("message").toString();
+    req.description = obj.value("description").toString();
+    req.passwordNew = obj.value("password_new").toBool(false);
+    req.confirmOnly = obj.value("confirm_only").toBool(false);
     req.replySocket = socket;
 
     if (req.cookie.isEmpty()) {
         std::print(stderr, "Keyring request missing cookie\n");
-        socket->write("ERROR\n");
-        socket->flush();
-        socket->disconnectFromServer();
+        sendJson(socket, QJsonObject{{"type", "error"}, {"error", "missing_cookie"}});
         return;
     }
 
@@ -332,50 +312,21 @@ void CAgent::handleKeyringRequest(QLocalSocket* socket, const QByteArray& payloa
 
     // Enqueue event for UI
     enqueueEvent(buildKeyringRequestEvent(req));
-
-    // Keep socket open - will respond when user enters password
-    // The socket will be cleaned up when we respond or cancel
 }
 
-void CAgent::handleKeyringConfirm(QLocalSocket* socket, const QByteArray& payload) {
-    QJsonParseError parseError;
-    QJsonDocument   doc = QJsonDocument::fromJson(payload, &parseError);
-
-    if (parseError.error != QJsonParseError::NoError) {
-        std::print(stderr, "Keyring confirm JSON parse error: {}\n", parseError.errorString().toStdString());
-        socket->write("ERROR\n");
-        socket->flush();
-        socket->disconnectFromServer();
+void CAgent::cleanupKeyringRequestsForSocket(QLocalSocket* socket) {
+    if (!socket)
         return;
+
+    QStringList staleCookies;
+    staleCookies.reserve(pendingKeyringRequests.size());
+    for (auto it = pendingKeyringRequests.cbegin(); it != pendingKeyringRequests.cend(); ++it) {
+        if (it->replySocket == socket)
+            staleCookies.append(it.key());
     }
 
-    QJsonObject obj = doc.object();
-
-    KeyringRequest req;
-    req.cookie      = obj["cookie"].toString();
-    req.title       = obj["title"].toString();
-    req.message     = obj["message"].toString();
-    req.description = obj["description"].toString();
-    req.passwordNew = false;
-    req.confirmOnly = true;
-    req.replySocket = socket;
-
-    if (req.cookie.isEmpty()) {
-        std::print(stderr, "Keyring confirm request missing cookie\n");
-        socket->write("ERROR\n");
-        socket->flush();
-        socket->disconnectFromServer();
-        return;
-    }
-
-    std::print("Keyring confirm request received: cookie={}\n", req.cookie.toStdString());
-
-    pendingKeyringRequests[req.cookie] = req;
-
-    // Enqueue event for UI
-    enqueueEvent(buildKeyringRequestEvent(req));
-
-    // Keep socket open for response
+    for (const auto& cookie : staleCookies)
+        cancelKeyringRequest(cookie);
 }
 
 void CAgent::respondToKeyringRequest(const QString& cookie, const QString& password) {
@@ -389,14 +340,13 @@ void CAgent::respondToKeyringRequest(const QString& cookie, const QString& passw
     std::print("Responding to keyring request: cookie={}\n", cookie.toStdString());
 
     if (req.replySocket && req.replySocket->isOpen()) {
-        if (req.confirmOnly) {
-            req.replySocket->write("CONFIRMED\n");
-        } else {
-            QByteArray response = "OK\n" + password.toUtf8() + "\n";
-            req.replySocket->write(response);
-        }
-        req.replySocket->flush();
-        req.replySocket->disconnectFromServer();
+        QJsonObject response;
+        response["type"]   = "keyring_response";
+        response["id"]     = cookie;
+        response["result"] = req.confirmOnly ? "confirmed" : "ok";
+        if (!req.confirmOnly)
+            response["password"] = password;
+        sendJson(req.replySocket, response);
     }
 
     // Notify UI that the request is complete
@@ -418,9 +368,11 @@ void CAgent::cancelKeyringRequest(const QString& cookie) {
     std::print("Cancelling keyring request: cookie={}\n", cookie.toStdString());
 
     if (req.replySocket && req.replySocket->isOpen()) {
-        req.replySocket->write("CANCEL\n");
-        req.replySocket->flush();
-        req.replySocket->disconnectFromServer();
+        QJsonObject response;
+        response["type"]   = "keyring_response";
+        response["id"]     = cookie;
+        response["result"] = "cancelled";
+        sendJson(req.replySocket, response);
     }
 
     // Notify UI that the request is complete (cancelled)

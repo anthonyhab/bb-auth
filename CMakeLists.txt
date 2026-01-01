@@ -12,6 +12,7 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network DBus)
 find_package(PkgConfig REQUIRED)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 
 pkg_check_modules(
   deps
@@ -55,11 +56,6 @@ add_executable(noctalia-keyring-prompter
 
 target_link_libraries(noctalia-keyring-prompter
     PRIVATE PkgConfig::gcr_deps
-)
-
-set_target_properties(noctalia-keyring-prompter PROPERTIES
-    C_STANDARD 11
-    C_STANDARD_REQUIRED ON
 )
 
 include(GNUInstallDirs)

@@ -27,6 +27,20 @@ cmake --build build
 sudo cmake --install build
 ```
 
+### Development Build
+
+For testing changes before committing, use the dev build script:
+
+```bash
+./build-dev.sh install    # Build and install to ~/.local
+./build-dev.sh enable     # Enable and start dev service
+./build-dev.sh status     # Check service status
+./build-dev.sh disable    # Switch back to AUR version
+./build-dev.sh uninstall  # Remove dev build
+```
+
+The dev build installs to `~/.local` and uses a separate systemd service in `~/.config/systemd/user/`, so it doesn't conflict with the AUR package installed to `/usr`.
+
 Enable the user service:
 
 ```bash

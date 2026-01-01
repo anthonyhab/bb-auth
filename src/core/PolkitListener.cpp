@@ -80,12 +80,8 @@ void CPolkitListener::request(const QString& request, bool echo) {
     session.prompt  = request;
     session.echoOn  = echo;
 
-    if (!session.requestSent) {
-        session.requestSent = true;
-        g_pAgent->enqueueRequest();
-    } else {
-        g_pAgent->enqueueRequest();
-    }
+    session.requestSent = true;
+    g_pAgent->enqueueRequest();
 }
 
 void CPolkitListener::completed(bool gainedAuthorization) {
@@ -140,7 +136,6 @@ void CPolkitListener::finishAuth() {
     else if (session.cancelled)
         g_pAgent->enqueueComplete("cancelled");
 
-    g_pAgent->resetAuthState();
 }
 
 void CPolkitListener::submitPassword(const QString& pass) {

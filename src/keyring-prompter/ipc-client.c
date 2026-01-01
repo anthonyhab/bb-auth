@@ -42,15 +42,15 @@ connect_to_socket (void)
 }
 
 static gchar *
-send_simple_command (const gchar *command)
+send_json_command (const gchar *json_request)
 {
     g_autoptr(GSocketConnection) connection = NULL;
     GOutputStream *output;
     GInputStream *input;
+    g_autoptr(GDataInputStream) data_input = NULL;
     GError *error = NULL;
     g_autofree gchar *request = NULL;
-    gchar buffer[4096];
-    gssize bytes_read;
+    gchar *line = NULL;
 
     connection = connect_to_socket ();
     if (!connection)
@@ -58,8 +58,9 @@ send_simple_command (const gchar *command)
 
     output = g_io_stream_get_output_stream (G_IO_STREAM (connection));
     input = g_io_stream_get_input_stream (G_IO_STREAM (connection));
+    data_input = g_data_input_stream_new (input);
 
-    request = g_strdup_printf ("%s\n", command);
+    request = g_strdup_printf ("%s\n", json_request);
 
     if (!g_output_stream_write_all (output, request, strlen (request),
                                     NULL, NULL, &error)) {
@@ -68,30 +69,59 @@ send_simple_command (const gchar *command)
         return NULL;
     }
 
-    bytes_read = g_input_stream_read (input, buffer, sizeof(buffer) - 1,
-                                      NULL, &error);
-
-    if (bytes_read < 0) {
+    line = g_data_input_stream_read_line (data_input, NULL, NULL, &error);
+    if (!line) {
         g_debug ("Failed to read response: %s", error->message);
         g_error_free (error);
         return NULL;
     }
 
-    buffer[bytes_read] = '\0';
-
-    /* Trim trailing newline */
-    gchar *newline = strchr (buffer, '\n');
-    if (newline)
-        *newline = '\0';
-
-    return g_strdup (buffer);
+    return line;
 }
 
 gboolean
 noctalia_ipc_ping (void)
 {
-    g_autofree gchar *response = send_simple_command ("PING");
-    return response && g_strcmp0 (response, "PONG") == 0;
+    g_autoptr(JsonBuilder) builder = NULL;
+    g_autoptr(JsonGenerator) generator = NULL;
+    g_autoptr(JsonNode) root = NULL;
+    g_autofree gchar *json_str = NULL;
+    g_autofree gchar *response = NULL;
+    g_autoptr(JsonParser) parser = NULL;
+    GError *error = NULL;
+
+    builder = json_builder_new ();
+    json_builder_begin_object (builder);
+    json_builder_set_member_name (builder, "type");
+    json_builder_add_string_value (builder, "ping");
+    json_builder_end_object (builder);
+
+    root = json_builder_get_root (builder);
+    generator = json_generator_new ();
+    json_generator_set_root (generator, root);
+    json_str = json_generator_to_data (generator, NULL);
+
+    response = send_json_command (json_str);
+    if (!response)
+        return FALSE;
+
+    parser = json_parser_new ();
+    if (!json_parser_load_from_data (parser, response, -1, &error)) {
+        g_debug ("Failed to parse ping response: %s", error->message);
+        g_error_free (error);
+        return FALSE;
+    }
+
+    JsonNode *resp_root = json_parser_get_root (parser);
+    if (!JSON_NODE_HOLDS_OBJECT (resp_root))
+        return FALSE;
+
+    JsonObject *resp_obj = json_node_get_object (resp_root);
+    if (!json_object_has_member (resp_obj, "type"))
+        return FALSE;
+
+    const gchar *type = json_object_get_string_member (resp_obj, "type");
+    return type && g_strcmp0 (type, "pong") == 0;
 }
 
 gboolean
@@ -102,23 +132,22 @@ noctalia_ipc_send_keyring_request (const gchar *cookie,
                                    gboolean     password_new,
                                    gchar      **out_password)
 {
-    g_autoptr(GSocketConnection) connection = NULL;
-    GOutputStream *output;
-    GInputStream *input;
     GError *error = NULL;
     g_autoptr(JsonBuilder) builder = NULL;
     g_autoptr(JsonGenerator) generator = NULL;
     g_autoptr(JsonNode) root = NULL;
     g_autofree gchar *json_str = NULL;
-    g_autofree gchar *request = NULL;
-    gchar buffer[8192];
-    gssize bytes_read;
+    g_autofree gchar *response = NULL;
+    g_autoptr(JsonParser) parser = NULL;
 
     *out_password = NULL;
 
     /* Build JSON payload */
     builder = json_builder_new ();
     json_builder_begin_object (builder);
+
+    json_builder_set_member_name (builder, "type");
+    json_builder_add_string_value (builder, "keyring_request");
 
     json_builder_set_member_name (builder, "cookie");
     json_builder_add_string_value (builder, cookie);
@@ -137,6 +166,9 @@ noctalia_ipc_send_keyring_request (const gchar *cookie,
     json_builder_set_member_name (builder, "password_new");
     json_builder_add_boolean_value (builder, password_new);
 
+    json_builder_set_member_name (builder, "confirm_only");
+    json_builder_add_boolean_value (builder, FALSE);
+
     json_builder_end_object (builder);
 
     root = json_builder_get_root (builder);
@@ -144,53 +176,53 @@ noctalia_ipc_send_keyring_request (const gchar *cookie,
     json_generator_set_root (generator, root);
     json_str = json_generator_to_data (generator, NULL);
 
-    /* Send KEYRING_REQUEST command with JSON payload */
-    request = g_strdup_printf ("KEYRING_REQUEST\n%s\n", json_str);
-
-    connection = connect_to_socket ();
-    if (!connection) {
+    response = send_json_command (json_str);
+    if (!response) {
         g_warning ("Failed to connect to noctalia-polkit socket");
         return FALSE;
     }
 
-    output = g_io_stream_get_output_stream (G_IO_STREAM (connection));
-    input = g_io_stream_get_input_stream (G_IO_STREAM (connection));
-
-    if (!g_output_stream_write_all (output, request, strlen (request),
-                                    NULL, NULL, &error)) {
-        g_warning ("Failed to send keyring request: %s", error->message);
+    parser = json_parser_new ();
+    if (!json_parser_load_from_data (parser, response, -1, &error)) {
+        g_warning ("Failed to parse keyring response: %s", error->message);
         g_error_free (error);
         return FALSE;
     }
 
-    /* Block waiting for response (password or cancel)
-     * Response format: OK\n<password>\n or CANCEL\n or ERROR\n */
-    bytes_read = g_input_stream_read (input, buffer, sizeof(buffer) - 1,
-                                      NULL, &error);
+    JsonNode *resp_root = json_parser_get_root (parser);
+    if (!JSON_NODE_HOLDS_OBJECT (resp_root))
+        return FALSE;
 
-    if (bytes_read < 0) {
-        g_warning ("Failed to read response: %s", error->message);
-        g_error_free (error);
+    JsonObject *resp_obj = json_node_get_object (resp_root);
+    if (!json_object_has_member (resp_obj, "type"))
+        return FALSE;
+
+    const gchar *type = json_object_get_string_member (resp_obj, "type");
+    if (!type || g_strcmp0 (type, "keyring_response") != 0)
+        return FALSE;
+
+    if (!json_object_has_member (resp_obj, "result"))
+        return FALSE;
+
+    const gchar *result = json_object_get_string_member (resp_obj, "result");
+    if (result && g_strcmp0 (result, "ok") == 0) {
+        if (!json_object_has_member (resp_obj, "password"))
+            return FALSE;
+
+        const gchar *password = json_object_get_string_member (resp_obj, "password");
+        if (password) {
+            *out_password = g_strdup (password);
+            return TRUE;
+        }
         return FALSE;
     }
 
-    buffer[bytes_read] = '\0';
-
-    /* Parse response */
-    if (g_str_has_prefix (buffer, "OK\n")) {
-        /* Password is on the second line */
-        gchar *password_start = buffer + 3;
-        gchar *newline = strchr (password_start, '\n');
-        if (newline)
-            *newline = '\0';
-        *out_password = g_strdup (password_start);
-        return TRUE;
-    } else if (g_str_has_prefix (buffer, "CANCEL")) {
+    if (result && g_strcmp0 (result, "cancelled") == 0) {
         g_debug ("Keyring request cancelled by user");
         return FALSE;
     }
 
-    g_warning ("Unexpected response from noctalia-polkit: %s", buffer);
+    g_warning ("Unexpected response from noctalia-polkit: %s", response);
     return FALSE;
 }
 
@@ -200,21 +232,20 @@ noctalia_ipc_send_confirm_request (const gchar *cookie,
                                    const gchar *message,
                                    const gchar *description)
 {
-    g_autoptr(GSocketConnection) connection = NULL;
-    GOutputStream *output;
-    GInputStream *input;
     GError *error = NULL;
     g_autoptr(JsonBuilder) builder = NULL;
     g_autoptr(JsonGenerator) generator = NULL;
     g_autoptr(JsonNode) root = NULL;
     g_autofree gchar *json_str = NULL;
-    g_autofree gchar *request = NULL;
-    gchar buffer[4096];
-    gssize bytes_read;
+    g_autofree gchar *response = NULL;
+    g_autoptr(JsonParser) parser = NULL;
 
     /* Build JSON payload */
     builder = json_builder_new ();
     json_builder_begin_object (builder);
+
+    json_builder_set_member_name (builder, "type");
+    json_builder_add_string_value (builder, "keyring_request");
 
     json_builder_set_member_name (builder, "cookie");
     json_builder_add_string_value (builder, cookie);
@@ -240,40 +271,58 @@ noctalia_ipc_send_confirm_request (const gchar *cookie,
     json_generator_set_root (generator, root);
     json_str = json_generator_to_data (generator, NULL);
 
-    request = g_strdup_printf ("KEYRING_CONFIRM\n%s\n", json_str);
-
-    connection = connect_to_socket ();
-    if (!connection)
+    response = send_json_command (json_str);
+    if (!response)
         return FALSE;
 
-    output = g_io_stream_get_output_stream (G_IO_STREAM (connection));
-    input = g_io_stream_get_input_stream (G_IO_STREAM (connection));
-
-    if (!g_output_stream_write_all (output, request, strlen (request),
-                                    NULL, NULL, &error)) {
-        g_warning ("Failed to send confirm request: %s", error->message);
+    parser = json_parser_new ();
+    if (!json_parser_load_from_data (parser, response, -1, &error)) {
+        g_warning ("Failed to parse confirm response: %s", error->message);
         g_error_free (error);
         return FALSE;
     }
 
-    bytes_read = g_input_stream_read (input, buffer, sizeof(buffer) - 1,
-                                      NULL, &error);
-
-    if (bytes_read < 0) {
-        g_warning ("Failed to read confirm response: %s", error->message);
-        g_error_free (error);
+    JsonNode *resp_root = json_parser_get_root (parser);
+    if (!JSON_NODE_HOLDS_OBJECT (resp_root))
         return FALSE;
-    }
 
-    buffer[bytes_read] = '\0';
+    JsonObject *resp_obj = json_node_get_object (resp_root);
+    if (!json_object_has_member (resp_obj, "type"))
+        return FALSE;
 
-    return g_str_has_prefix (buffer, "CONFIRMED");
+    const gchar *type = json_object_get_string_member (resp_obj, "type");
+    if (!type || g_strcmp0 (type, "keyring_response") != 0)
+        return FALSE;
+
+    if (!json_object_has_member (resp_obj, "result"))
+        return FALSE;
+
+    const gchar *result = json_object_get_string_member (resp_obj, "result");
+    return result && g_strcmp0 (result, "confirmed") == 0;
 }
 
 void
 noctalia_ipc_send_cancel (const gchar *cookie)
 {
-    g_autofree gchar *command = g_strdup_printf ("CANCEL %s", cookie);
-    g_autofree gchar *response = send_simple_command (command);
+    g_autoptr(JsonBuilder) builder = NULL;
+    g_autoptr(JsonGenerator) generator = NULL;
+    g_autoptr(JsonNode) root = NULL;
+    g_autofree gchar *json_str = NULL;
+    g_autofree gchar *response = NULL;
+
+    builder = json_builder_new ();
+    json_builder_begin_object (builder);
+    json_builder_set_member_name (builder, "type");
+    json_builder_add_string_value (builder, "cancel");
+    json_builder_set_member_name (builder, "id");
+    json_builder_add_string_value (builder, cookie);
+    json_builder_end_object (builder);
+
+    root = json_builder_get_root (builder);
+    generator = json_generator_new ();
+    json_generator_set_root (generator, root);
+    json_str = json_generator_to_data (generator, NULL);
+
+    response = send_json_command (json_str);
     /* Ignore response - best effort cancel */
 }
