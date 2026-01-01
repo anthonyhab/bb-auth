@@ -67,6 +67,7 @@ include(GNUInstallDirs)
 set_target_properties(noctaliapolkitagent PROPERTIES OUTPUT_NAME "noctalia-polkit")
 
 set(LIBEXECDIR ${CMAKE_INSTALL_FULL_LIBEXECDIR})
+set(DATADIR ${CMAKE_INSTALL_FULL_DATADIR})
 configure_file(assets/noctalia-polkit.service.in noctalia-polkit.service @ONLY)
 configure_file(assets/noctalia-polkit-dbus.service.in noctalia-polkit-dbus.service @ONLY)
 configure_file(assets/org.gnome.keyring.SystemPrompter.service.in org.gnome.keyring.SystemPrompter.service @ONLY)
@@ -79,4 +80,4 @@ install(FILES ${CMAKE_BINARY_DIR}/noctalia-polkit-dbus.service
         DESTINATION ${CMAKE_INSTALL_DATADIR}/dbus-1/services
         RENAME org.noctalia.polkitagent.service)
 install(FILES ${CMAKE_BINARY_DIR}/org.gnome.keyring.SystemPrompter.service
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/dbus-1/services)
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/noctalia-polkit)
