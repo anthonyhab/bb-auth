@@ -13,7 +13,7 @@ Requires polkit-auth [plugin](https://github.com/anthonyhab/noctalia-plugins/tre
 ### Arch Linux (AUR)
 
 ```bash
-yay -S noctalia-polkit-git
+yay -S noctalia-unofficial-auth-agent
 ```
 
 ### Manual Build (Arch / Fedora / Debian/Ubuntu)
