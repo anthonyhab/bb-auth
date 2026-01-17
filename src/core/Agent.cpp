@@ -1,7 +1,17 @@
 #define POLKIT_AGENT_I_KNOW_API_IS_SUBJECT_TO_CHANGE 1
 
 #include <print>
+#include <cstddef>
 #include <QDBusConnection>
+
+namespace {
+    void secureZero(void* ptr, std::size_t len) {
+        volatile unsigned char* p = static_cast<volatile unsigned char*>(ptr);
+        while (len--)
+            *p++ = 0;
+    }
+} // namespace
+
 #include <QDBusInterface>
 #include <QDBusReply>
 #include <QJsonDocument>
@@ -11,8 +21,11 @@
 #undef signals
 #endif
 #include <polkitagent/polkitagent.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "Agent.hpp"
+#include "RequestContext.hpp"
 
 bool CAgent::start(QCoreApplication& app, const QString& socketPath) {
     sessionSubject = std::make_shared<PolkitQt1::UnixSessionSubject>(getpid());
@@ -34,10 +47,7 @@ bool CAgent::start(QCoreApplication& app, const QString& socketPath) {
 
 bool CAgent::checkFingerprintAvailable() {
     // Check if fprintd is available and user has enrolled fingerprints
-    QDBusInterface manager("net.reactivated.Fprint",
-                           "/net/reactivated/Fprint/Manager",
-                           "net.reactivated.Fprint.Manager",
-                           QDBusConnection::systemBus());
+    QDBusInterface manager("net.reactivated.Fprint", "/net/reactivated/Fprint/Manager", "net.reactivated.Fprint.Manager", QDBusConnection::systemBus());
 
     if (!manager.isValid())
         return false;
@@ -52,16 +62,13 @@ bool CAgent::checkFingerprintAvailable() {
         return false;
 
     // Check if current user has enrolled fingerprints on this device
-    QDBusInterface device("net.reactivated.Fprint",
-                          devicePath,
-                          "net.reactivated.Fprint.Device",
-                          QDBusConnection::systemBus());
+    QDBusInterface device("net.reactivated.Fprint", devicePath, "net.reactivated.Fprint.Device", QDBusConnection::systemBus());
 
     if (!device.isValid())
         return false;
 
     // ListEnrolledFingers returns the list of enrolled fingers for a user
-    QString username = qgetenv("USER");
+    QString                 username     = qgetenv("USER");
     QDBusReply<QStringList> fingersReply = device.call("ListEnrolledFingers", username);
 
     if (!fingersReply.isValid())
@@ -70,42 +77,67 @@ bool CAgent::checkFingerprintAvailable() {
     return !fingersReply.value().isEmpty();
 }
 
-void CAgent::initAuthPrompt() {
-    if (!listener.session.inProgress) {
-        std::print(stderr, "INTERNAL ERROR: Auth prompt requested but session isn't in progress\n");
+void CAgent::initAuthPrompt(const QString& cookie) {
+    if (!listener.sessions.contains(cookie)) {
+        std::print(stderr, "INTERNAL ERROR: Auth prompt requested but session {} isn't in progress\n", cookie.toStdString());
         return;
     }
 
-    std::print("Auth prompt requested\n");
+    std::print("Auth prompt requested for {}\n", cookie.toStdString());
     // The actual request is emitted when the session provides a prompt.
 }
 
 void CAgent::enqueueEvent(const QJsonObject& event) {
+    std::print("Enqueuing event: {}\n", QJsonDocument(event).toJson(QJsonDocument::Indented).toStdString());
     eventQueue.enqueue(event);
 }
 
-QJsonObject CAgent::buildRequestEvent() const {
+QJsonObject CAgent::buildRequestEvent(const QString& cookie) const {
+    if (!listener.sessions.contains(cookie))
+        return {};
+
+    const auto& session = *listener.sessions[cookie];
+
     QJsonObject event;
     event["type"]                 = "request";
     event["source"]               = "polkit";
-    event["id"]                   = listener.session.cookie;
-    event["actionId"]             = listener.session.actionId;
-    event["message"]              = listener.session.message;
-    event["icon"]                 = listener.session.iconName;
-    event["user"]                 = listener.session.selectedUser.toString();
-    event["prompt"]               = listener.session.prompt;
-    event["echo"]                 = listener.session.echoOn;
+    event["id"]                   = session.cookie;
+    event["actionId"]             = session.actionId;
+    event["message"]              = session.message;
+    event["icon"]                 = session.iconName;
+    event["user"]                 = session.selectedUser.toString();
+    event["prompt"]               = RequestContextHelper::normalizePrompt(session.prompt);
+    event["echo"]                 = session.echoOn;
     event["fingerprintAvailable"] = fingerprintAvailable;
 
     QJsonObject details;
-    const auto  keys = listener.session.details.keys();
+    const auto  keys = session.details.keys();
     for (const auto& key : keys) {
-        details.insert(key, listener.session.details.lookup(key));
+        details.insert(key, session.details.lookup(key));
     }
     event["details"] = details;
 
-    if (!listener.session.errorText.isEmpty())
-        event["error"] = listener.session.errorText;
+    // Rich context
+    ActorInfo requestor;
+    auto      pid = RequestContextHelper::extractSubjectPid(session.details);
+    if (pid) {
+        auto subject = RequestContextHelper::readProc(*pid);
+        if (subject) {
+            event["subject"]   = subject->toJson();
+            requestor          = RequestContextHelper::resolveRequestorFromSubject(*subject, getuid());
+            event["requestor"] = requestor.toJson();
+
+            std::print("Resolved requestor: {} (confidence: {})\n", requestor.displayName.toStdString(), requestor.confidence.toStdString());
+        }
+    } else {
+        std::print("No PID found in polkit details for requestor resolution\n");
+    }
+
+    if (!session.errorText.isEmpty())
+        event["error"] = session.errorText;
+
+    // Hint
+    event["hint"] = RequestContextHelper::classifyRequest("polkit", event["actionId"].toString(), event["message"].toString(), requestor);
 
     return event;
 }
@@ -128,37 +160,37 @@ QJsonObject CAgent::buildKeyringRequestEvent(const KeyringRequest& req) const {
     return event;
 }
 
-void CAgent::enqueueRequest() {
-    enqueueEvent(buildRequestEvent());
+void CAgent::enqueueRequest(const QString& cookie) {
+    enqueueEvent(buildRequestEvent(cookie));
 }
 
-void CAgent::enqueueError(const QString& error) {
+void CAgent::enqueueError(const QString& cookie, const QString& error) {
     QJsonObject event;
     event["type"]  = "update";
-    event["id"]    = listener.session.cookie;
+    event["id"]    = cookie;
     event["error"] = error;
     enqueueEvent(event);
 }
 
-void CAgent::enqueueComplete(const QString& result) {
+void CAgent::enqueueComplete(const QString& cookie, const QString& result) {
     QJsonObject event;
     event["type"]   = "complete";
-    event["id"]     = listener.session.cookie;
+    event["id"]     = cookie;
     event["result"] = result;
     enqueueEvent(event);
 }
 
 bool CAgent::handleRespond(const QString& cookie, const QString& password) {
-    if (!listener.session.inProgress || listener.session.cookie != cookie)
+    if (!listener.sessions.contains(cookie))
         return false;
-    listener.submitPassword(password);
+    listener.submitPassword(cookie, password);
     return true;
 }
 
 bool CAgent::handleCancel(const QString& cookie) {
-    if (!listener.session.inProgress || listener.session.cookie != cookie)
+    if (!listener.sessions.contains(cookie))
         return false;
-    listener.cancelPending();
+    listener.cancelPending(cookie);
     return true;
 }
 
@@ -192,9 +224,7 @@ void CAgent::setupIpcServer() {
     });
 
     if (!ipcServer->listen(ipcSocketPath)) {
-        std::print(stderr, "IPC listen failed on {}: {}\n",
-                   ipcSocketPath.toStdString(),
-                   ipcServer->errorString().toStdString());
+        std::print(stderr, "IPC listen failed on {}: {}\n", ipcSocketPath.toStdString(), ipcServer->errorString().toStdString());
         return;
     }
 
@@ -202,6 +232,15 @@ void CAgent::setupIpcServer() {
 }
 
 void CAgent::handleSocketLine(QLocalSocket* socket, const QByteArray& line) {
+    // Input validation: reject oversized messages
+    constexpr qsizetype MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
+    if (line.size() > MAX_MESSAGE_SIZE) {
+        std::print(stderr, "Rejected oversized message: {} bytes\n", line.size());
+        sendJson(socket, QJsonObject{{"type", "error"}, {"error", "message_too_large"}});
+        socket->disconnectFromServer();
+        return;
+    }
+
     QJsonParseError parseError;
     QJsonDocument   doc = QJsonDocument::fromJson(line, &parseError);
 
@@ -277,14 +316,17 @@ void CAgent::handleSocketLine(QLocalSocket* socket, const QByteArray& line) {
     sendJson(socket, QJsonObject{{"type", "error"}, {"error", "unknown_command"}});
 }
 
-void CAgent::sendJson(QLocalSocket* socket, const QJsonObject& obj, bool disconnect) {
+void CAgent::sendJson(QLocalSocket* socket, const QJsonObject& obj, bool disconnect, bool secure) {
     if (!socket || socket->state() != QLocalSocket::ConnectedState)
         return;
 
-    const auto json = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    QByteArray json = QJsonDocument(obj).toJson(QJsonDocument::Compact);
     socket->write(json);
     socket->write("\n");
     socket->flush();
+
+    if (secure)
+        secureZero(json.data(), json.size());
 
     if (disconnect)
         socket->disconnectFromServer();
@@ -308,10 +350,51 @@ void CAgent::handleKeyringRequest(QLocalSocket* socket, const QJsonObject& obj) 
 
     std::print("Keyring request received: cookie={} title={}\n", req.cookie.toStdString(), req.title.toStdString());
 
+    // Try to parse origin PID from title: [PID]@host
+    if (req.title.startsWith('[')) {
+        int end = req.title.indexOf(']');
+        if (end > 1) {
+            bool   ok  = false;
+            qint64 pid = req.title.mid(1, end - 1).toLongLong(&ok);
+            if (ok) {
+                req.originPid = pid;
+                std::print("Parsed origin PID from title: {}\n", pid);
+            }
+        }
+    }
+
     pendingKeyringRequests[req.cookie] = req;
 
     // Enqueue event for UI
-    enqueueEvent(buildKeyringRequestEvent(req));
+    QJsonObject event = buildKeyringRequestEvent(req);
+
+    // Try to get peer PID for keyring requestor
+    qint64 targetPid = 0;
+    if (req.originPid > 0) {
+        targetPid = req.originPid;
+    } else {
+        struct ucred ucred;
+        socklen_t    len = sizeof(struct ucred);
+        if (getsockopt(socket->socketDescriptor(), SOL_SOCKET, SO_PEERCRED, &ucred, &len) != -1) {
+            targetPid = ucred.pid;
+        }
+    }
+
+    if (targetPid > 0) {
+        auto subject = RequestContextHelper::readProc(targetPid);
+        if (subject) {
+            event["subject"]   = subject->toJson();
+            auto requestor     = RequestContextHelper::resolveRequestorFromSubject(*subject, getuid());
+            event["requestor"] = requestor.toJson();
+            event["hint"]      = RequestContextHelper::classifyRequest("keyring", req.title, req.description, requestor);
+        }
+    }
+
+    if (!event.contains("hint")) {
+        event["hint"] = RequestContextHelper::classifyRequest("keyring", req.title, req.description, {});
+    }
+
+    enqueueEvent(event);
 }
 
 void CAgent::cleanupKeyringRequestsForSocket(QLocalSocket* socket) {
@@ -346,7 +429,7 @@ void CAgent::respondToKeyringRequest(const QString& cookie, const QString& passw
         response["result"] = req.confirmOnly ? "confirmed" : "ok";
         if (!req.confirmOnly)
             response["password"] = password;
-        sendJson(req.replySocket, response);
+        sendJson(req.replySocket, response, true, !req.confirmOnly);
     }
 
     // Notify UI that the request is complete

@@ -14,6 +14,14 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+if(NOT MSVC)
+    add_compile_options(-Wall -Wextra -Werror=format-security)
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_definitions(_FORTIFY_SOURCE=2)
+    endif()
+    add_link_options(-Wl,-z,relro -Wl,-z,now)
+endif()
+
 pkg_check_modules(
   deps
   REQUIRED
@@ -39,6 +47,8 @@ qt_add_executable(noctaliapolkitagent
     src/core/Agent.hpp
     src/core/PolkitListener.hpp
     src/core/PolkitListener.cpp
+    src/core/RequestContext.hpp
+    src/core/RequestContext.cpp
 )
 
 target_link_libraries(noctaliapolkitagent

@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QMap>
 
 #include <polkitqt1-agent-listener.h>
 #include <polkitqt1-identity.h>
@@ -14,10 +15,10 @@ class CPolkitListener : public PolkitQt1::Agent::Listener {
 
   public:
     CPolkitListener(QObject* parent = nullptr);
-    ~CPolkitListener() override {};
+    ~CPolkitListener() override;
 
-    void submitPassword(const QString& pass);
-    void cancelPending();
+    void submitPassword(const QString& cookie, const QString& pass);
+    void cancelPending(const QString& cookie);
 
   public Q_SLOTS:
     void initiateAuthentication(const QString& actionId, const QString& message, const QString& iconName, const PolkitQt1::Details& details, const QString& cookie,
@@ -31,20 +32,26 @@ class CPolkitListener : public PolkitQt1::Agent::Listener {
     void showInfo(const QString& text);
 
   private:
-    struct {
+    struct SessionState {
         bool                           inProgress = false, cancelled = false, gainedAuth = false;
         QString                        cookie, message, iconName, actionId;
         QString                        prompt, errorText;
-        bool                           echoOn = false;
+        bool                           echoOn      = false;
         bool                           requestSent = false;
         PolkitQt1::Details             details;
         PolkitQt1::Agent::AsyncResult* result = nullptr;
         PolkitQt1::Identity            selectedUser;
         PolkitQt1::Agent::Session*     session = nullptr;
-    } session;
 
-    void reattempt();
-    void finishAuth();
+        int                            retryCount       = 0;
+        static constexpr int           MAX_AUTH_RETRIES = 3;
+    };
+
+    QMap<QString, SessionState*> sessions;
+
+    void                         reattempt(SessionState* state);
+    void                         finishAuth(SessionState* state);
+    SessionState*                findStateForSession(PolkitQt1::Agent::Session* session);
 
     friend class CAgent;
 };

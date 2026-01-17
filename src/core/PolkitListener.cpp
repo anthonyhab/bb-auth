@@ -5,21 +5,29 @@
 
 #include <print>
 
+#include "RequestContext.hpp"
+
 using namespace PolkitQt1::Agent;
 
 CPolkitListener::CPolkitListener(QObject* parent) : Listener(parent) {
     ;
 }
 
+CPolkitListener::~CPolkitListener() {
+    for (auto* state : sessions.values()) {
+        delete state;
+    }
+}
+
 void CPolkitListener::initiateAuthentication(const QString& actionId, const QString& message, const QString& iconName, const PolkitQt1::Details& details, const QString& cookie,
                                              const PolkitQt1::Identity::List& identities, AsyncResult* result) {
 
-    std::print("> New authentication session\n");
+    std::print("> New authentication session (cookie: {})\n", cookie.toStdString());
 
-    if (session.inProgress) {
-        result->setError("Authentication in progress");
+    if (sessions.contains(cookie)) {
+        std::print("> REJECTING: Session with cookie {} already exists\n", cookie.toStdString());
+        result->setError("Duplicate session");
         result->setCompleted();
-        std::print("> REJECTING: Another session present\n");
         return;
     }
 
@@ -30,36 +38,39 @@ void CPolkitListener::initiateAuthentication(const QString& actionId, const QStr
         return;
     }
 
-    session.selectedUser = identities.at(0);
-    session.cookie       = cookie;
-    session.result       = result;
-    session.actionId     = actionId;
-    session.message      = message;
-    session.iconName     = iconName;
-    session.gainedAuth   = false;
-    session.cancelled    = false;
-    session.prompt       = "";
-    session.errorText    = "";
-    session.echoOn       = false;
-    session.requestSent  = false;
-    session.details      = details;
-    session.inProgress   = true;
+    auto* state         = new SessionState;
+    state->selectedUser = identities.at(0);
+    state->cookie       = cookie;
+    state->result       = result;
+    state->actionId     = actionId;
+    state->message      = message;
+    state->iconName     = iconName;
+    state->gainedAuth   = false;
+    state->cancelled    = false;
+    state->prompt       = "";
+    state->errorText    = "";
+    state->echoOn       = false;
+    state->requestSent  = false;
+    state->details      = details;
+    state->inProgress   = true;
 
-    g_pAgent->initAuthPrompt();
+    sessions.insert(cookie, state);
 
-    reattempt();
+    g_pAgent->initAuthPrompt(cookie);
+
+    reattempt(state);
 }
 
-void CPolkitListener::reattempt() {
-    session.cancelled = false;
+void CPolkitListener::reattempt(SessionState* state) {
+    state->cancelled = false;
 
-    session.session = new Session(session.selectedUser, session.cookie, session.result);
-    connect(session.session, SIGNAL(request(QString, bool)), this, SLOT(request(QString, bool)));
-    connect(session.session, SIGNAL(completed(bool)), this, SLOT(completed(bool)));
-    connect(session.session, SIGNAL(showError(QString)), this, SLOT(showError(QString)));
-    connect(session.session, SIGNAL(showInfo(QString)), this, SLOT(showInfo(QString)));
+    state->session = new Session(state->selectedUser, state->cookie, state->result);
+    connect(state->session, SIGNAL(request(QString, bool)), this, SLOT(request(QString, bool)));
+    connect(state->session, SIGNAL(completed(bool)), this, SLOT(completed(bool)));
+    connect(state->session, SIGNAL(showError(QString)), this, SLOT(showError(QString)));
+    connect(state->session, SIGNAL(showInfo(QString)), this, SLOT(showInfo(QString)));
 
-    session.session->initiate();
+    state->session->initiate();
 }
 
 bool CPolkitListener::initiateAuthenticationFinish() {
@@ -68,90 +79,137 @@ bool CPolkitListener::initiateAuthenticationFinish() {
 }
 
 void CPolkitListener::cancelAuthentication() {
-    std::print("> cancelAuthentication()\n");
+    std::print("> cancelAuthentication() - cancelling ALL sessions\n");
 
-    session.cancelled = true;
+    for (auto* state : sessions.values()) {
+        state->cancelled = true;
+        finishAuth(state);
+    }
+}
 
-    finishAuth();
+CPolkitListener::SessionState* CPolkitListener::findStateForSession(Session* session) {
+    for (auto* state : sessions.values()) {
+        if (state->session == session)
+            return state;
+    }
+    return nullptr;
 }
 
 void CPolkitListener::request(const QString& request, bool echo) {
-    std::print("> PKS request: {} echo: {}\n", request.toStdString(), echo);
-    session.prompt  = request;
-    session.echoOn  = echo;
+    auto* session = qobject_cast<Session*>(sender());
+    auto* state   = findStateForSession(session);
+    if (!state)
+        return;
 
-    session.requestSent = true;
-    g_pAgent->enqueueRequest();
+    std::print("> PKS request (cookie: {}): {} echo: {}\n", state->cookie.toStdString(), request.toStdString(), echo);
+    state->prompt = request;
+    state->echoOn = echo;
+
+    state->requestSent = true;
+    g_pAgent->enqueueRequest(state->cookie);
 }
 
 void CPolkitListener::completed(bool gainedAuthorization) {
-    std::print("> PKS completed: {}\n", gainedAuthorization ? "Auth successful" : "Auth unsuccessful");
+    auto* session = qobject_cast<Session*>(sender());
+    auto* state   = findStateForSession(session);
+    if (!state)
+        return;
 
-    session.gainedAuth = gainedAuthorization;
+    std::print("> PKS completed (cookie: {}): {}\n", state->cookie.toStdString(), gainedAuthorization ? "Auth successful" : "Auth unsuccessful");
+
+    state->gainedAuth = gainedAuthorization;
 
     if (!gainedAuthorization) {
-        session.errorText = "Authentication failed";
-        g_pAgent->enqueueError(session.errorText);
+        state->errorText = "Authentication failed";
+        g_pAgent->enqueueError(state->cookie, state->errorText);
     }
 
-    finishAuth();
+    finishAuth(state);
 }
 
 void CPolkitListener::showError(const QString& text) {
-    std::print("> PKS showError: {}\n", text.toStdString());
+    auto* session = qobject_cast<Session*>(sender());
+    auto* state   = findStateForSession(session);
+    if (!state)
+        return;
 
-    session.errorText = text;
-    g_pAgent->enqueueError(text);
+    std::print("> PKS showError (cookie: {}): {}\n", state->cookie.toStdString(), text.toStdString());
+
+    state->errorText = text;
+    g_pAgent->enqueueError(state->cookie, text);
 }
 
 void CPolkitListener::showInfo(const QString& text) {
-    std::print("> PKS showInfo: {}\n", text.toStdString());
+    auto* session = qobject_cast<Session*>(sender());
+    auto* state   = findStateForSession(session);
+    if (!state)
+        return;
+
+    std::print("> PKS showInfo (cookie: {}): {}\n", state->cookie.toStdString(), text.toStdString());
 }
 
-void CPolkitListener::finishAuth() {
-    if (!session.inProgress) {
-        std::print("> finishAuth: ODD. !session.inProgress\n");
+void CPolkitListener::finishAuth(SessionState* state) {
+    if (!state->inProgress) {
+        std::print("> finishAuth: ODD. !state->inProgress for cookie {}\n", state->cookie.toStdString());
         return;
     }
 
-    if (!session.gainedAuth && !session.cancelled) {
-        std::print("> finishAuth: Did not gain auth. Reattempting.\n");
-        session.session->deleteLater();
-        reattempt();
-        return;
+    if (!state->gainedAuth && !state->cancelled) {
+        state->retryCount++;
+        if (state->retryCount < SessionState::MAX_AUTH_RETRIES) {
+            std::print("> finishAuth: Did not gain auth (attempt {}/{}). Reattempting for cookie {}.\n", state->retryCount, SessionState::MAX_AUTH_RETRIES,
+                       state->cookie.toStdString());
+            state->session->deleteLater();
+            reattempt(state);
+            return;
+        } else {
+            std::print("> finishAuth: Max retries ({}) reached for cookie {}. Failing.\n", SessionState::MAX_AUTH_RETRIES, state->cookie.toStdString());
+            state->errorText = "Too many failed attempts";
+            g_pAgent->enqueueError(state->cookie, state->errorText);
+        }
     }
 
-    std::print("> finishAuth: Gained auth, cleaning up.\n");
+    std::print("> finishAuth: Gained auth, cancelled, or max retries reached. Cleaning up cookie {}.\n", state->cookie.toStdString());
 
-    session.inProgress = false;
+    state->inProgress = false;
 
-    if (session.session) {
-        session.session->result()->setCompleted();
-        session.session->deleteLater();
+    if (state->session) {
+        state->session->result()->setCompleted();
+        state->session->deleteLater();
     } else
-        session.result->setCompleted();
+        state->result->setCompleted();
 
-    if (session.gainedAuth)
-        g_pAgent->enqueueComplete("success");
-    else if (session.cancelled)
-        g_pAgent->enqueueComplete("cancelled");
+    if (state->gainedAuth)
+        g_pAgent->enqueueComplete(state->cookie, "success");
+    else if (state->cancelled)
+        g_pAgent->enqueueComplete(state->cookie, "cancelled");
 
+    sessions.remove(state->cookie);
+    delete state;
 }
 
-void CPolkitListener::submitPassword(const QString& pass) {
-    if (!session.session)
+void CPolkitListener::submitPassword(const QString& cookie, const QString& pass) {
+    if (!sessions.contains(cookie))
         return;
 
-    session.session->setResponse(pass);
+    auto* state = sessions[cookie];
+    if (!state->session)
+        return;
+
+    state->session->setResponse(pass);
 }
 
-void CPolkitListener::cancelPending() {
-    if (!session.session)
+void CPolkitListener::cancelPending(const QString& cookie) {
+    if (!sessions.contains(cookie))
         return;
 
-    session.session->cancel();
+    auto* state = sessions[cookie];
+    if (!state->session)
+        return;
 
-    session.cancelled = true;
+    state->session->cancel();
 
-    finishAuth();
+    state->cancelled = true;
+
+    finishAuth(state);
 }
