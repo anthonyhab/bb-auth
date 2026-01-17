@@ -133,6 +133,11 @@ QJsonObject CAgent::buildRequestEvent(const QString& cookie) const {
         std::print("No PID found in polkit details for requestor resolution\n");
     }
 
+    if (!requestor.iconName.isEmpty()) {
+        event["icon"] = requestor.iconName;
+        std::print("Upgrading icon to resolved requestor icon: {}\n", requestor.iconName.toStdString());
+    }
+
     if (!session.errorText.isEmpty())
         event["error"] = session.errorText;
 

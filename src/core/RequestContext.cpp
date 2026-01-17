@@ -1,4 +1,5 @@
 #include "RequestContext.hpp"
+#include <print>
 #include <QFile>
 #include <QFileInfo>
 #include <QTextStream>
@@ -165,18 +166,25 @@ ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subj
     ActorInfo actor;
     actor.proc = subject;
 
+    std::print("Resolving requestor from PID {} (uid={}, exe={})\n", subject.pid, subject.uid, subject.exe.toStdString());
+
     qint64 currPid = subject.pid;
     int    hops    = 0;
 
     while (currPid > 1 && hops < 16) {
         auto info = readProc(currPid);
-        if (!info)
+        if (!info) {
+            std::print("Requestor resolution: failed to read /proc for pid {}\n", currPid);
             break;
+        }
+
+        std::print("Requestor resolution: pid {} (ppid={}, uid={}, exe={})\n", info->pid, info->ppid, info->uid, info->exe.toStdString());
 
         // Skip processes not owned by the user (agent) to avoid "systemd" or "root" being the requestor
         if (info->uid != agentUid && agentUid != 0) {
             // If we are root agent (unlikely here but still), we might not want to skip.
             // But usually this agent runs as user.
+            std::print("Requestor resolution: stopping at pid {} (uid mismatch)\n", info->pid);
             break;
         }
 
@@ -185,11 +193,14 @@ ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subj
             actor.proc       = *info;
             actor.desktop    = d;
             actor.confidence = "desktop";
+            std::print("Requestor resolution: matched desktop entry {} (icon={})\n", d.desktopId.toStdString(), d.iconName.toStdString());
             break;
         }
 
-        if (info->ppid <= 1 || info->ppid == currPid)
+        if (info->ppid <= 1 || info->ppid == currPid) {
+            std::print("Requestor resolution: stopping at pid {} (ppid={})\n", info->pid, info->ppid);
             break;
+        }
         currPid = info->ppid;
         hops++;
     }
