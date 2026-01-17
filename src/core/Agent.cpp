@@ -142,7 +142,16 @@ QJsonObject CAgent::buildRequestEvent(const QString& cookie) const {
         event["error"] = session.errorText;
 
     // Hint
-    event["hint"] = RequestContextHelper::classifyRequest("polkit", event["actionId"].toString(), event["message"].toString(), requestor);
+    QJsonObject hint = RequestContextHelper::classifyRequest("polkit", event["actionId"].toString(), event["message"].toString(), requestor);
+    event["hint"]    = hint;
+
+    if (event["icon"].toString().isEmpty()) {
+        const auto hintIcon = hint.value("iconName").toString();
+        if (!hintIcon.isEmpty()) {
+            event["icon"] = hintIcon;
+            std::print("Fallback to hint icon: {}\n", hintIcon.toStdString());
+        }
+    }
 
     return event;
 }
@@ -397,6 +406,14 @@ void CAgent::handleKeyringRequest(QLocalSocket* socket, const QJsonObject& obj) 
 
     if (!event.contains("hint")) {
         event["hint"] = RequestContextHelper::classifyRequest("keyring", req.title, req.description, {});
+    }
+
+    if (event.value("icon").toString().isEmpty()) {
+        const auto hintIcon = event.value("hint").toObject().value("iconName").toString();
+        if (!hintIcon.isEmpty()) {
+            event["icon"] = hintIcon;
+            std::print("Fallback to hint icon for keyring: {}\n", hintIcon.toStdString());
+        }
     }
 
     enqueueEvent(event);

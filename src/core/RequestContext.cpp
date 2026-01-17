@@ -32,8 +32,7 @@ QJsonObject ActorInfo::toJson() const {
         obj["desktopId"] = desktop.desktopId;
     }
     obj["displayName"] = displayName;
-    if (!iconName.isEmpty())
-        obj["iconName"] = iconName;
+    obj["iconName"] = iconName;
     obj["fallbackLetter"] = fallbackLetter;
     obj["fallbackKey"]    = fallbackKey;
     obj["confidence"]     = confidence;
@@ -215,6 +214,9 @@ ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subj
         actor.iconName    = actor.desktop.iconName;
     } else if (!actor.proc.exe.isEmpty()) {
         actor.displayName = QFileInfo(actor.proc.exe).fileName();
+        if (actor.iconName.isEmpty()) {
+            actor.iconName = QFileInfo(actor.proc.exe).baseName().toLower();
+        }
     } else {
         actor.displayName = "Unknown";
     }
