@@ -36,6 +36,7 @@ class CAgent {
         QString                title;
         QString                message;
         QString                description;
+        QString                warning;
         qint64                 originPid   = 0;
         bool                   passwordNew = false;
         bool                   confirmOnly = false;

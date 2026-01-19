@@ -15,6 +15,7 @@ gboolean noctalia_ipc_send_keyring_request (const gchar *cookie,
                                             const gchar *title,
                                             const gchar *message,
                                             const gchar *description,
+                                            const gchar *warning,
                                             gboolean     password_new,
                                             gchar      **out_password);
 

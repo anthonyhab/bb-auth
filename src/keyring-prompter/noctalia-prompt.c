@@ -196,6 +196,7 @@ password_request_thread (GTask        *task,
         self->title ? self->title : "Unlock Keyring",
         self->message ? self->message : "Password required",
         self->description,
+        self->warning,
         self->password_new,
         &password
     );

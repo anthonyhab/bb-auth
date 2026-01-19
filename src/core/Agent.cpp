@@ -192,6 +192,9 @@ QJsonObject CAgent::buildKeyringRequestEvent(const KeyringRequest& req) const {
     if (!req.description.isEmpty())
         event["description"] = req.description;
 
+    if (!req.warning.isEmpty())
+        event["warning"] = req.warning;
+
     event["hint"] = RequestContextHelper::classifyRequest("keyring", req.title, req.description, ActorInfo{});
 
     return event;
@@ -375,6 +378,7 @@ void CAgent::handleKeyringRequest(QLocalSocket* socket, const QJsonObject& obj) 
     req.title       = obj.value("title").toString();
     req.message     = obj.value("message").toString();
     req.description = obj.value("description").toString();
+    req.warning     = obj.value("warning").toString();
     req.passwordNew = obj.value("password_new").toBool(false);
     req.confirmOnly = obj.value("confirm_only").toBool(false);
     req.replySocket = socket;

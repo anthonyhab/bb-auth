@@ -129,6 +129,7 @@ noctalia_ipc_send_keyring_request (const gchar *cookie,
                                    const gchar *title,
                                    const gchar *message,
                                    const gchar *description,
+                                   const gchar *warning,
                                    gboolean     password_new,
                                    gchar      **out_password)
 {
@@ -161,6 +162,11 @@ noctalia_ipc_send_keyring_request (const gchar *cookie,
     if (description) {
         json_builder_set_member_name (builder, "description");
         json_builder_add_string_value (builder, description);
+    }
+
+    if (warning && warning[0] != '\0') {
+        json_builder_set_member_name (builder, "warning");
+        json_builder_add_string_value (builder, warning);
     }
 
     json_builder_set_member_name (builder, "password_new");
