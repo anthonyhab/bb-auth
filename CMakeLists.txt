@@ -47,6 +47,8 @@ qt_add_executable(noctalia-auth
     src/main.cpp
 
     # Common utilities
+    src/common/IpcClient.cpp
+    src/common/IpcClient.hpp
     src/common/Paths.cpp
     src/common/Paths.hpp
 
