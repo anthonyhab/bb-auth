@@ -1,3 +1,4 @@
+#include "common/IpcClient.hpp"
 #include "common/Paths.hpp"
 #include "core/Agent.hpp"
 #include "modes/daemon.hpp"
@@ -7,7 +8,6 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLocalSocket>
 #include <QTextStream>
 
 #include <print>
@@ -37,37 +37,6 @@ namespace {
             return Mode::Keyring;
 
         return Mode::Cli; // Default to CLI mode (which includes daemon)
-    }
-
-    bool sendJsonCommand(const QString& socketPath, const QJsonObject& request, QJsonObject* response) {
-        QLocalSocket socket;
-        socket.connectToServer(socketPath);
-        if (!socket.waitForConnected(1000))
-            return false;
-
-        QByteArray data = QJsonDocument(request).toJson(QJsonDocument::Compact);
-        data.append("\n");
-
-        if (socket.write(data) == -1 || !socket.waitForBytesWritten(1000))
-            return false;
-
-        if (!socket.waitForReadyRead(1000))
-            return false;
-        if (!socket.canReadLine() && !socket.waitForReadyRead(1000))
-            return false;
-
-        const QByteArray replyLine = socket.readLine().trimmed();
-        if (replyLine.isEmpty())
-            return false;
-
-        QJsonParseError parseError;
-        const auto      doc = QJsonDocument::fromJson(replyLine, &parseError);
-        if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-            return false;
-
-        if (response)
-            *response = doc.object();
-        return true;
     }
 
     int runCli(QCoreApplication& app, const QString& socketPathOverride) {
@@ -118,35 +87,36 @@ namespace {
 
         // CLI commands for interacting with daemon
         if (parser.isSet(optPing)) {
-            QJsonObject response;
-            const bool  ok = sendJsonCommand(socketPath, QJsonObject{{"type", "ping"}}, &response);
-            return (ok && response.value("type").toString() == "pong") ? 0 : 1;
+            noctalia::IpcClient client(socketPath);
+            return client.ping() ? 0 : 1;
         }
 
         if (parser.isSet(optNext)) {
-            QJsonObject response;
-            const bool  ok = sendJsonCommand(socketPath, QJsonObject{{"type", "next"}}, &response);
-            if (ok && response.value("type").toString() != "empty") {
-                const auto out = QJsonDocument(response).toJson(QJsonDocument::Compact);
+            noctalia::IpcClient client(socketPath);
+            auto                response = client.sendRequest(QJsonObject{{"type", "next"}}, 1000);
+            if (response && response->value("type").toString() != "empty") {
+                const auto out = QJsonDocument(*response).toJson(QJsonDocument::Compact);
                 fprintf(stdout, "%s\n", out.constData());
             }
-            return ok ? 0 : 1;
+            return response ? 0 : 1;
         }
 
         if (parser.isSet(optRespond)) {
-            const QString cookie = parser.value(optRespond);
-            QTextStream   stdinStream(stdin);
-            const QString password = stdinStream.readLine();
-            QJsonObject   response;
-            const bool    ok = sendJsonCommand(socketPath, QJsonObject{{"type", "respond"}, {"id", cookie}, {"response", password}}, &response);
-            return (ok && response.value("type").toString() == "ok") ? 0 : 1;
+            const QString       cookie = parser.value(optRespond);
+            QTextStream         stdinStream(stdin);
+            const QString       password = stdinStream.readLine();
+
+            noctalia::IpcClient client(socketPath);
+            auto                response = client.sendRequest(QJsonObject{{"type", "respond"}, {"id", cookie}, {"response", password}}, 1000);
+            return (response && response->value("type").toString() == "ok") ? 0 : 1;
         }
 
         if (parser.isSet(optCancel)) {
-            const QString cookie = parser.value(optCancel);
-            QJsonObject   response;
-            const bool    ok = sendJsonCommand(socketPath, QJsonObject{{"type", "cancel"}, {"id", cookie}}, &response);
-            return (ok && response.value("type").toString() == "ok") ? 0 : 1;
+            const QString       cookie = parser.value(optCancel);
+
+            noctalia::IpcClient client(socketPath);
+            auto                response = client.sendRequest(QJsonObject{{"type", "cancel"}, {"id", cookie}}, 1000);
+            return (response && response->value("type").toString() == "ok") ? 0 : 1;
         }
 
         // No explicit mode or CLI command - default to daemon
