@@ -53,6 +53,8 @@ qt_add_executable(noctalia-auth
     src/common/Paths.hpp
 
     # Core components
+    src/core/Session.hpp
+    src/core/Session.cpp
     src/core/Agent.cpp
     src/core/Agent.hpp
     src/core/PolkitListener.hpp
@@ -60,6 +62,13 @@ qt_add_executable(noctalia-auth
     src/core/RequestContext.hpp
     src/core/RequestContext.cpp
     src/core/ipc/IpcServer.cpp
+
+    # Managers
+    src/core/managers/KeyringManager.cpp
+    src/core/managers/KeyringManager.hpp
+    src/core/managers/PinentryManager.cpp
+    src/core/managers/PinentryManager.hpp
+    src/core/managers/RequestTypes.hpp
 
     # Mode handlers
     src/modes/daemon.cpp
