@@ -13,7 +13,7 @@ namespace noctalia {
 
     // Pinentry timeouts
     inline constexpr int PINENTRY_REQUEST_TIMEOUT_MS      = 5 * 60 * 1000; // 5 minutes
-    inline constexpr int PINENTRY_DEFERRED_DELAY_MS       = 1500;
+    inline constexpr int PINENTRY_DEFERRED_DELAY_MS       = 300;
     inline constexpr int PINENTRY_DEFERRED_DELAY_RETRY_MS = 3000;
 
     // Authentication

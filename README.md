@@ -45,14 +45,14 @@ Enable the user service:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now noctalia-polkit.service
+systemctl --user enable --now noctalia-auth.service
 ```
 
 Notes:
 - Test polkit authentication by running `pkexec true`
 - Test keyring unlock by locking your keyring (via Seahorse or `dbus-send`) then running `echo test | secret-tool store --label=test attr val`
 - Make sure you have the plugin installed, reload noctalia-shell if you aren't seeing requests after installing.
-- The Noctalia plugin connects over IPC at `$XDG_RUNTIME_DIR/noctalia-polkit-agent.sock`.
+- The Noctalia plugin connects over IPC at `$XDG_RUNTIME_DIR/noctalia-auth.sock`.
 
 ### NixOS / Nix
 
@@ -66,5 +66,5 @@ Then enable the user service:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now noctalia-polkit.service
+systemctl --user enable --now noctalia-auth.service
 ```
