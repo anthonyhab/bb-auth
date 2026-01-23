@@ -11,7 +11,7 @@ static gchar *
 get_socket_path (void)
 {
     const gchar *runtime_dir = g_get_user_runtime_dir ();
-    return g_build_filename (runtime_dir, "noctalia-polkit-agent.sock", NULL);
+    return g_build_filename (runtime_dir, "noctalia-auth.sock", NULL);
 }
 
 static GSocketConnection *

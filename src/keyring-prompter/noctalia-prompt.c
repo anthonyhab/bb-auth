@@ -236,10 +236,11 @@ noctalia_prompt_password_async (GcrPrompt          *prompt,
     g_free (self->request_cookie);
     self->request_cookie = generate_cookie (self);
 
-    g_message ("Async: Starting keyring password request: cookie=%s title=%s message=%s",
+    g_message ("Async: Starting keyring password request: cookie=%s title=%s message=%s warning=%s",
                self->request_cookie,
                self->title ? self->title : "(null)",
-               self->message ? self->message : "(null)");
+               self->message ? self->message : "(null)",
+               self->warning ? self->warning : "(null)");
 
     /* Run the blocking IPC in a thread to not block the main loop */
     g_task_run_in_thread (task, password_request_thread);

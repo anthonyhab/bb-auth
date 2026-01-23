@@ -1,5 +1,4 @@
 #include "RequestContext.hpp"
-#include "RequestContext.hpp"
 #include <QFile>
 #include <QFileInfo>
 #include <QTextStream>
@@ -34,8 +33,8 @@ QJsonObject ActorInfo::toJson() const {
     if (desktop.isValid()) {
         obj["desktopId"] = desktop.desktopId;
     }
-    obj["displayName"] = displayName;
-    obj["iconName"] = iconName;
+    obj["displayName"]    = displayName;
+    obj["iconName"]       = iconName;
     obj["fallbackLetter"] = fallbackLetter;
     obj["fallbackKey"]    = fallbackKey;
     obj["confidence"]     = confidence;
@@ -43,20 +42,23 @@ QJsonObject ActorInfo::toJson() const {
 }
 
 std::optional<qint64> RequestContextHelper::extractSubjectPid(const PolkitQt1::Details& details) {
-    bool ok = false;
+    bool   ok  = false;
     qint64 pid = details.lookup("polkit.subject-pid").toLongLong(&ok);
-    if (ok && pid > 0) return pid;
-    
+    if (ok && pid > 0)
+        return pid;
+
     pid = details.lookup("polkit.caller-pid").toLongLong(&ok);
-    if (ok && pid > 0) return pid;
+    if (ok && pid > 0)
+        return pid;
 
     return std::nullopt;
 }
 
 std::optional<qint64> RequestContextHelper::extractCallerPid(const PolkitQt1::Details& details) {
-    bool ok = false;
+    bool   ok  = false;
     qint64 pid = details.lookup("polkit.caller-pid").toLongLong(&ok);
-    if (ok && pid > 0) return pid;
+    if (ok && pid > 0)
+        return pid;
     return std::nullopt;
 }
 
@@ -218,7 +220,7 @@ ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subj
         if (!info->exe.isEmpty()) {
             d = findDesktopForExe(info->exe);
         }
-        
+
         if (!d.isValid() && !info->name.isEmpty()) {
             d = findDesktopForExe(info->name);
         }

@@ -13,6 +13,15 @@
 
 #define FALLBACK_GCR_PROMPTER "/usr/lib/gcr-prompter"
 
+/* Entry point callable from C++ unified binary */
+#ifdef __cplusplus
+extern "C" {
+#endif
+int noctalia_keyring_main(int argc, char *argv[]);
+#ifdef __cplusplus
+}
+#endif
+
 static GcrSystemPrompter *the_prompter = NULL;
 static GMainLoop *main_loop = NULL;
 static guint timeout_id = 0;
@@ -111,8 +120,9 @@ fallback_to_gcr_prompter (char *argv[])
     exit (1);
 }
 
+/* Renamed entry point for unified binary */
 int
-main (int argc, char *argv[])
+noctalia_keyring_main (int argc, char *argv[])
 {
     guint owner_id;
 
@@ -126,16 +136,16 @@ main (int argc, char *argv[])
                            g_log_default_handler, NULL);
     }
 
-    g_message ("noctalia-keyring-prompter starting");
+    g_message ("noctalia-auth starting in keyring mode");
 
-    /* Check if noctalia-polkit socket is available */
+    /* Check if noctalia-auth daemon socket is available */
     if (!noctalia_ipc_ping ()) {
-        g_message ("noctalia-polkit socket not available");
+        g_message ("noctalia-auth daemon socket not available");
         fallback_to_gcr_prompter (argv);
         /* Not reached */
     }
 
-    g_message ("noctalia-polkit socket is available, starting keyring prompter");
+    g_message ("noctalia-auth daemon socket is available, registering prompter");
 
     /* Create system prompter with our custom prompt type */
     the_prompter = gcr_system_prompter_new (GCR_SYSTEM_PROMPTER_SINGLE,

@@ -2,16 +2,20 @@
 
 #include <QObject>
 #include <QString>
-#include <QMap>
+#include <QHash>
 
 #include <polkitqt1-agent-listener.h>
 #include <polkitqt1-identity.h>
 #include <polkitqt1-details.h>
 #include <polkitqt1-agent-session.h>
 
+namespace noctalia {
+    class CAgent;
+}
+
 class CPolkitListener : public PolkitQt1::Agent::Listener {
-    Q_OBJECT;
-    Q_DISABLE_COPY(CPolkitListener);
+    Q_OBJECT
+    Q_DISABLE_COPY(CPolkitListener)
 
   public:
     CPolkitListener(QObject* parent = nullptr);
@@ -20,16 +24,20 @@ class CPolkitListener : public PolkitQt1::Agent::Listener {
     void submitPassword(const QString& cookie, const QString& pass);
     void cancelPending(const QString& cookie);
 
+  Q_SIGNALS:
+    // Signal removed, CAgent handles logic now
+    void completed(bool gainedAuthorization);
+
   public Q_SLOTS:
     void initiateAuthentication(const QString& actionId, const QString& message, const QString& iconName, const PolkitQt1::Details& details, const QString& cookie,
                                 const PolkitQt1::Identity::List& identities, PolkitQt1::Agent::AsyncResult* result) override;
     bool initiateAuthenticationFinish() override;
     void cancelAuthentication() override;
 
-    void request(const QString& request, bool echo);
-    void completed(bool gainedAuthorization);
-    void showError(const QString& text);
-    void showInfo(const QString& text);
+    void onSessionRequest(const QString& request, bool echo);
+    void onSessionCompleted(bool gainedAuthorization);
+    void onSessionError(const QString& text);
+    void onSessionInfo(const QString& text);
 
   private:
     struct SessionState {
@@ -47,11 +55,14 @@ class CPolkitListener : public PolkitQt1::Agent::Listener {
         static constexpr int           MAX_AUTH_RETRIES = 3;
     };
 
-    QMap<QString, SessionState*> sessions;
+    // Map from cookie to session state
+    QHash<QString, SessionState*> m_cookieToState;
+    // Reverse map for O(1) lookup
+    QHash<PolkitQt1::Agent::Session*, SessionState*> m_sessionToState;
 
-    void                         reattempt(SessionState* state);
-    void                         finishAuth(SessionState* state);
-    SessionState*                findStateForSession(PolkitQt1::Agent::Session* session);
+    void                                             reattempt(SessionState* state);
+    void                                             finishAuth(SessionState* state);
+    SessionState*                                    findStateForSession(PolkitQt1::Agent::Session* session);
 
-    friend class CAgent;
+    friend class noctalia::CAgent;
 };
