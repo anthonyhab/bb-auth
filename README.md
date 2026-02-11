@@ -127,11 +127,27 @@ nix profile install .#bb-auth
 
 Previously known as `noctalia-auth` (daemon) and `polkit-auth` (plugin).  
 Renamed to BB Auth as part of the "habibe → bibe → BB" branding.  
-If you were using the previous names, disable the old service and enable the new one:
+
+### Upgrading from noctalia-auth
+
+If you were using the previous version, run the migration script after installing:
 
 ```bash
-systemctl --user disable noctalia-auth
-systemctl --user enable bb-auth
+bb-auth-migrate
+# Or to automatically remove legacy binaries:
+bb-auth-migrate --remove-binaries
+```
+
+This will:
+- Stop and disable the old `noctalia-auth.service`
+- Clean up legacy runtime files and state
+- Back up your old state directory
+- Report any legacy binaries that need manual removal
+
+Then enable the new service:
+
+```bash
+systemctl --user enable --now bb-auth
 ```
 
 The plugin ID has changed from `polkit-auth` to `bb-auth`. Reinstall through the Noctalia plugin UI.
