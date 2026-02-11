@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network DBus)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network DBus Widgets)
 find_package(PkgConfig REQUIRED)
 
 if(NOT MSVC)
@@ -104,9 +104,31 @@ set(DATADIR ${CMAKE_INSTALL_FULL_DATADIR})
 configure_file(assets/noctalia-auth.service.in noctalia-auth.service @ONLY)
 configure_file(assets/noctalia-auth-dbus.service.in noctalia-auth-dbus.service @ONLY)
 configure_file(assets/org.gnome.keyring.SystemPrompter.service.in org.gnome.keyring.SystemPrompter.service @ONLY)
+configure_file(assets/noctalia-auth-bootstrap.sh.in noctalia-auth-bootstrap @ONLY)
 
 # Install main binary
 install(TARGETS noctalia-auth
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
+
+qt_add_executable(noctalia-auth-fallback
+    src/fallback/main.cpp
+    src/fallback/FallbackClient.cpp
+    src/fallback/FallbackClient.hpp
+    src/fallback/FallbackWindow.cpp
+    src/fallback/FallbackWindow.hpp
+)
+
+target_link_libraries(noctalia-auth-fallback
+    PRIVATE
+        Qt6::Core
+        Qt6::Network
+        Qt6::Widgets
+)
+
+install(TARGETS noctalia-auth-fallback
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
+
+install(PROGRAMS ${CMAKE_BINARY_DIR}/noctalia-auth-bootstrap
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
 
 # Install symlinks for protocol compatibility

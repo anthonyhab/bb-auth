@@ -11,10 +11,14 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QProcess>
+#include <QSet>
 #include <QStandardPaths>
 #include <QUuid>
+#include <QFileInfo>
 
 #include <memory>
+#include <limits>
 #include <pwd.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -25,6 +29,59 @@ using namespace noctalia;
 
 std::unique_ptr<CAgent> g_pAgent;
 
+namespace {
+
+inline constexpr qint64 PROVIDER_HEARTBEAT_TIMEOUT_MS    = 15000;
+inline constexpr int    PROVIDER_MAINTENANCE_INTERVAL_MS = 5000;
+inline constexpr qint64 FALLBACK_LAUNCH_COOLDOWN_MS      = 5000;
+
+QJsonObject readBootstrapState() {
+    QJsonObject bootstrap;
+
+    const QString stateRoot = QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation);
+    if (stateRoot.isEmpty()) {
+        return bootstrap;
+    }
+
+    QFile stateFile(stateRoot + "/noctalia-auth/bootstrap-state.env");
+    if (!stateFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return bootstrap;
+    }
+
+    while (!stateFile.atEnd()) {
+        const QString line = QString::fromUtf8(stateFile.readLine()).trimmed();
+        if (line.isEmpty() || line.startsWith('#')) {
+            continue;
+        }
+
+        const int delimiter = line.indexOf('=');
+        if (delimiter <= 0) {
+            continue;
+        }
+
+        const QString key = line.left(delimiter).trimmed();
+        const QString value = line.mid(delimiter + 1).trimmed();
+        if (key.isEmpty()) {
+            continue;
+        }
+
+        if (key == "timestamp") {
+            bootstrap[key] = value.toLongLong();
+        } else {
+            bootstrap[key] = value;
+        }
+    }
+
+    const QByteArray modeOverride = qgetenv("NOCTALIA_AUTH_CONFLICT_MODE");
+    if (!modeOverride.isEmpty()) {
+        bootstrap["mode"] = QString::fromLocal8Bit(modeOverride);
+    }
+
+    return bootstrap;
+}
+
+} // namespace
+
 CAgent::CAgent(QObject* parent) : QObject(parent), m_listener(new CPolkitListener(this)) {
 }
 
@@ -33,6 +90,8 @@ CAgent::~CAgent() {}
 #include <PolkitQt1/Subject>
 
 bool CAgent::start(QCoreApplication& app, const QString& socketPath) {
+    m_socketPath = socketPath;
+
     PolkitQt1::UnixSessionSubject subject(getpid());
     if (!m_listener->registerListener(subject, "/org/kde/PolicyKit1/AuthenticationAgent")) {
         std::print(stderr, "Failed to register as Polkit agent listener\n");
@@ -44,15 +103,15 @@ bool CAgent::start(QCoreApplication& app, const QString& socketPath) {
     // Connect Polkit signals
     connect(m_listener.data(), &CPolkitListener::completed, this, &CAgent::onPolkitCompleted);
 
-    // Connect Manager signals
-    connect(&m_pinentryManager, &noctalia::PinentryManager::deferredComplete, this, [this](const QString&, const QJsonObject& event) {
-        emitSessionEvent(event);
-    });
-
     // Setup IPC server
     m_ipcServer.setMessageHandler([this](QLocalSocket* socket, const QString& type, const QJsonObject& msg) { handleMessage(socket, type, msg); });
 
     QObject::connect(&m_ipcServer, &noctalia::IpcServer::clientDisconnected, [this](QLocalSocket* socket) { onClientDisconnected(socket); });
+
+    m_providerMaintenanceTimer.setInterval(PROVIDER_MAINTENANCE_INTERVAL_MS);
+    m_providerMaintenanceTimer.setSingleShot(false);
+    QObject::connect(&m_providerMaintenanceTimer, &QTimer::timeout, [this]() { pruneStaleProviders(); });
+    m_providerMaintenanceTimer.start();
 
     if (!m_ipcServer.start(socketPath)) {
         std::print(stderr, "Failed to start IPC server on {}\n", socketPath.toStdString());
@@ -67,18 +126,46 @@ void CAgent::onClientDisconnected(QLocalSocket* socket) {
     if (m_subscribers.removeOne(socket)) {
         qDebug() << "Subscriber removed, remaining:" << m_subscribers.size();
     }
+
+    if (m_uiProviders.remove(socket) > 0) {
+        qDebug() << "UI provider disconnected:" << socket;
+        recomputeActiveProvider();
+    }
+
     nextWaiters.removeAll(socket);
     m_keyringManager.cleanupForSocket(socket);
     m_pinentryManager.cleanupForSocket(socket);
+
+    if (!hasActiveProvider() && !m_sessions.empty()) {
+        ensureFallbackUiRunning("provider-disconnected");
+    }
 }
 
 void CAgent::handleMessage(QLocalSocket* socket, const QString& type, const QJsonObject& msg) {
     if (type == "ping") {
-        m_ipcServer.sendJson(socket, QJsonObject{
+        QJsonObject pong{
             {"type", "pong"},
             {"version", "2.0"},
             {"capabilities", QJsonArray{"polkit", "keyring", "pinentry"}}
-        });
+        };
+
+        const QJsonObject bootstrap = readBootstrapState();
+        if (!bootstrap.isEmpty()) {
+            pong["bootstrap"] = bootstrap;
+        }
+
+        if (hasActiveProvider()) {
+            const auto& provider = m_uiProviders[m_activeProvider];
+            QJsonObject providerObj{
+                {"id", provider.id},
+                {"name", provider.name},
+                {"kind", provider.kind},
+                {"priority", provider.priority}
+            };
+            pong["provider"] = providerObj;
+        }
+
+        m_ipcServer.sendJson(socket, pong);
     } else if (type == "subscribe") {
         handleSubscribe(socket);
     } else if (type == "next") {
@@ -87,6 +174,14 @@ void CAgent::handleMessage(QLocalSocket* socket, const QString& type, const QJso
         handleKeyringRequest(socket, msg);
     } else if (type == "pinentry_request") {
         handlePinentryRequest(socket, msg);
+    } else if (type == "pinentry_result") {
+        handlePinentryResult(socket, msg);
+    } else if (type == "ui.register") {
+        handleUIRegister(socket, msg);
+    } else if (type == "ui.heartbeat") {
+        handleUIHeartbeat(socket, msg);
+    } else if (type == "ui.unregister") {
+        handleUIUnregister(socket, msg);
     } else if (type == "session.respond") {
         handleRespond(socket, msg);
     } else if (type == "session.cancel") {
@@ -112,16 +207,27 @@ void CAgent::handleSubscribe(QLocalSocket* socket) {
         qDebug() << "Subscriber added, total:" << m_subscribers.size();
     }
 
-    // Sync active sessions
-    for (const auto& [cookie, session] : m_sessions) {
-        m_ipcServer.sendJson(socket, session->toCreatedEvent());
-        m_ipcServer.sendJson(socket, session->toUpdatedEvent());
+    const bool isRegisteredProvider = m_uiProviders.contains(socket);
+    const bool isActiveProvider = isRegisteredProvider && (socket == m_activeProvider);
+    const bool canReceiveInteractiveEvents = !isRegisteredProvider || isActiveProvider;
+
+    if (canReceiveInteractiveEvents) {
+        for (const auto& [cookie, session] : m_sessions) {
+            m_ipcServer.sendJson(socket, session->toCreatedEvent());
+            m_ipcServer.sendJson(socket, session->toUpdatedEvent());
+        }
     }
 
-    m_ipcServer.sendJson(socket, QJsonObject{
+    QJsonObject subscribedMsg{
         {"type", "subscribed"},
-        {"sessionCount", (int)m_sessions.size()}
-    });
+        {"sessionCount", canReceiveInteractiveEvents ? static_cast<int>(m_sessions.size()) : 0}
+    };
+
+    if (isRegisteredProvider) {
+        subscribedMsg["active"] = isActiveProvider;
+    }
+
+    m_ipcServer.sendJson(socket, subscribedMsg);
 }
 
 void CAgent::handleKeyringRequest(QLocalSocket* socket, const QJsonObject& msg) {
@@ -134,9 +240,94 @@ void CAgent::handlePinentryRequest(QLocalSocket* socket, const QJsonObject& msg)
     m_pinentryManager.handleRequest(msg, socket, peerPid);
 }
 
+void CAgent::handlePinentryResult(QLocalSocket* socket, const QJsonObject& msg) {
+    pid_t peerPid = noctalia::IpcServer::getPeerPid(socket);
+    QJsonObject result = m_pinentryManager.handleResult(msg, peerPid);
+    m_ipcServer.sendJson(socket, result);
+}
+
+void CAgent::handleUIRegister(QLocalSocket* socket, const QJsonObject& msg) {
+    auto& provider = m_uiProviders[socket];
+
+    if (provider.id.isEmpty()) {
+        provider.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+
+    provider.name = msg.value("name").toString();
+    if (provider.name.isEmpty()) {
+        provider.name = "unknown";
+    }
+
+    provider.kind = msg.value("kind").toString();
+    if (provider.kind.isEmpty()) {
+        provider.kind = provider.name;
+    }
+
+    const int requestedPriority = msg.value("priority").toInt();
+    if (msg.contains("priority")) {
+        provider.priority = requestedPriority;
+    } else if (provider.kind == "quickshell") {
+        provider.priority = 100;
+    } else if (provider.kind == "fallback") {
+        provider.priority = 10;
+    } else {
+        provider.priority = 50;
+    }
+
+    provider.lastHeartbeatMs = QDateTime::currentMSecsSinceEpoch();
+    const bool activeProviderChanged = recomputeActiveProvider(false);
+
+    m_ipcServer.sendJson(socket, QJsonObject{
+        {"type", "ui.registered"},
+        {"id", provider.id},
+        {"active", socket == m_activeProvider},
+        {"priority", provider.priority}
+    });
+
+    if (activeProviderChanged || socket == m_activeProvider) {
+        emitProviderStatus();
+    }
+}
+
+void CAgent::handleUIHeartbeat(QLocalSocket* socket, const QJsonObject& msg) {
+    Q_UNUSED(msg)
+
+    auto it = m_uiProviders.find(socket);
+    if (it == m_uiProviders.end()) {
+        m_ipcServer.sendJson(socket, QJsonObject{{"type", "error"}, {"message", "Provider not registered"}});
+        return;
+    }
+
+    it->lastHeartbeatMs = QDateTime::currentMSecsSinceEpoch();
+    recomputeActiveProvider();
+
+    m_ipcServer.sendJson(socket, QJsonObject{{"type", "ok"}, {"active", socket == m_activeProvider}});
+}
+
+void CAgent::handleUIUnregister(QLocalSocket* socket, const QJsonObject& msg) {
+    Q_UNUSED(msg)
+
+    if (m_uiProviders.remove(socket) == 0) {
+        m_ipcServer.sendJson(socket, QJsonObject{{"type", "error"}, {"message", "Provider not registered"}});
+        return;
+    }
+
+    recomputeActiveProvider();
+    m_ipcServer.sendJson(socket, QJsonObject{{"type", "ok"}});
+
+    if (!hasActiveProvider() && !m_sessions.empty()) {
+        ensureFallbackUiRunning("provider-unregistered");
+    }
+}
+
 void CAgent::handleRespond(QLocalSocket* socket, const QJsonObject& msg) {
     const QString cookie   = msg.value("id").toString();
     const QString response = msg.value("response").toString();
+
+    if (!isAuthorizedProviderSocket(socket)) {
+        m_ipcServer.sendJson(socket, QJsonObject{{"type", "error"}, {"message", "Not active UI provider"}});
+        return;
+    }
 
     if (m_keyringManager.hasPendingRequest(cookie)) {
         QLocalSocket* origSocket = m_keyringManager.getSocketForRequest(cookie);
@@ -146,11 +337,33 @@ void CAgent::handleRespond(QLocalSocket* socket, const QJsonObject& msg) {
         return;
     }
 
-    if (m_pinentryManager.hasPendingRequest(cookie)) {
-        QLocalSocket* origSocket = m_pinentryManager.getSocketForRequest(cookie);
+    if (m_pinentryManager.hasPendingInput(cookie)) {
+        QLocalSocket* origSocket = m_pinentryManager.getSocketForPendingInput(cookie);
         auto result = m_pinentryManager.handleResponse(cookie, response);
-        if (origSocket) m_ipcServer.sendJson(origSocket, result.socketResponse, true);
+        if (!origSocket || result.socketResponse.value("type").toString() == "error") {
+            const QString message = result.socketResponse.value("message").toString();
+            m_ipcServer.sendJson(socket, QJsonObject{{"type", "error"}, {"message", message.isEmpty() ? "Invalid pinentry session state" : message}});
+            return;
+        }
+
+        m_ipcServer.sendJson(origSocket, result.socketResponse, true);
         m_ipcServer.sendJson(socket, QJsonObject{{"type", "ok"}});
+        return;
+    }
+
+    if (m_pinentryManager.hasRequest(cookie)) {
+        m_ipcServer.sendJson(socket, QJsonObject{{"type", "error"}, {"message", "Session is not accepting input"}});
+        return;
+    }
+
+    Session* session = getSession(cookie);
+    if (!session) {
+        m_ipcServer.sendJson(socket, QJsonObject{{"type", "error"}, {"message", "Unknown session"}});
+        return;
+    }
+
+    if (session->source() != Session::Source::Polkit) {
+        m_ipcServer.sendJson(socket, QJsonObject{{"type", "error"}, {"message", "Session is not awaiting direct response"}});
         return;
     }
 
@@ -161,6 +374,11 @@ void CAgent::handleRespond(QLocalSocket* socket, const QJsonObject& msg) {
 void CAgent::handleCancel(QLocalSocket* socket, const QJsonObject& msg) {
     const QString cookie = msg.value("id").toString();
 
+    if (!isAuthorizedProviderSocket(socket)) {
+        m_ipcServer.sendJson(socket, QJsonObject{{"type", "error"}, {"message", "Not active UI provider"}});
+        return;
+    }
+
     if (m_keyringManager.hasPendingRequest(cookie)) {
         QLocalSocket* origSocket = m_keyringManager.getSocketForRequest(cookie);
         QJsonObject reply = m_keyringManager.handleCancel(cookie);
@@ -169,11 +387,29 @@ void CAgent::handleCancel(QLocalSocket* socket, const QJsonObject& msg) {
         return;
     }
 
-    if (m_pinentryManager.hasPendingRequest(cookie)) {
-        QLocalSocket* origSocket = m_pinentryManager.getSocketForRequest(cookie);
+    if (m_pinentryManager.hasRequest(cookie)) {
+        QLocalSocket* origSocket = m_pinentryManager.getSocketForPendingInput(cookie);
         QJsonObject reply = m_pinentryManager.handleCancel(cookie);
-        if (origSocket) m_ipcServer.sendJson(origSocket, reply);
+        if (reply.value("type").toString() == "error") {
+            m_ipcServer.sendJson(socket, reply);
+            return;
+        }
+
+        if (origSocket) {
+            m_ipcServer.sendJson(origSocket, reply);
+        }
         m_ipcServer.sendJson(socket, QJsonObject{{"type", "ok"}});
+        return;
+    }
+
+    Session* session = getSession(cookie);
+    if (!session) {
+        m_ipcServer.sendJson(socket, QJsonObject{{"type", "error"}, {"message", "Unknown session"}});
+        return;
+    }
+
+    if (session->source() != Session::Source::Polkit) {
+        m_ipcServer.sendJson(socket, QJsonObject{{"type", "error"}, {"message", "Session is not cancellable from this path"}});
         return;
     }
 
@@ -182,12 +418,21 @@ void CAgent::handleCancel(QLocalSocket* socket, const QJsonObject& msg) {
 }
 
 void CAgent::emitSessionEvent(const QJsonObject& event) {
-    qDebug() << "Broadcasting event:" << event["type"].toString()
-             << "to" << m_subscribers.size() << "subscribers";
+    const QString eventType = event.value("type").toString();
 
-    for (QLocalSocket* subscriber : m_subscribers) {
-        if (subscriber && subscriber->isValid()) {
-            m_ipcServer.sendJson(subscriber, event);
+    if (isSessionEventForProviderRouting(event) && hasActiveProvider()) {
+        if (m_activeProvider && m_activeProvider->isValid()) {
+            qDebug() << "Routing event" << eventType << "to active provider";
+            m_ipcServer.sendJson(m_activeProvider, event);
+        }
+    } else {
+        qDebug() << "Broadcasting event:" << eventType
+                 << "to" << m_subscribers.size() << "subscribers";
+
+        for (QLocalSocket* subscriber : m_subscribers) {
+            if (subscriber && subscriber->isValid()) {
+                m_ipcServer.sendJson(subscriber, event);
+            }
         }
     }
 
@@ -220,6 +465,7 @@ void CAgent::onPolkitRequest(const QString& cookie, const QString& message,
             ctx.requestor.name = actor.displayName;
             ctx.requestor.icon = actor.iconName;
             ctx.requestor.fallbackLetter = actor.fallbackLetter;
+            ctx.requestor.fallbackKey = actor.fallbackKey;
             ctx.requestor.pid = *pid;
         }
     }
@@ -227,6 +473,7 @@ void CAgent::onPolkitRequest(const QString& cookie, const QString& message,
     if (ctx.requestor.name.isEmpty()) {
         ctx.requestor.name = "Unknown";
         ctx.requestor.fallbackLetter = "?";
+        ctx.requestor.fallbackKey = "unknown";
     }
 
     createSession(cookie, noctalia::Session::Source::Polkit, ctx);
@@ -254,6 +501,10 @@ void CAgent::onSessionComplete(const QString& cookie, bool success) {
                               : noctalia::Session::Result::Cancelled);
     emitSessionEvent(it->second->toClosedEvent());
     m_sessions.erase(it);
+
+    if (m_sessions.empty()) {
+        recomputeActiveProvider();
+    }
 }
 
 void CAgent::onSessionRetry(const QString& cookie, const QString& error) {
@@ -270,17 +521,22 @@ void CAgent::onPolkitCompleted(bool gainedAuthorization) {
 // Centralized session management
 void CAgent::createSession(const QString& id, Session::Source source, Session::Context ctx) {
     auto session = std::make_unique<noctalia::Session>(id, source, ctx);
-    emitSessionEvent(session->toCreatedEvent());
+    const QJsonObject createdEvent = session->toCreatedEvent();
     m_sessions[id] = std::move(session);
+    emitSessionEvent(createdEvent);
+
+    if (!hasActiveProvider()) {
+        ensureFallbackUiRunning("session-created");
+    }
 }
 
-void CAgent::updateSessionPrompt(const QString& id, const QString& prompt, bool echo) {
+void CAgent::updateSessionPrompt(const QString& id, const QString& prompt, bool echo, bool clearError) {
     auto it = m_sessions.find(id);
     if (it == m_sessions.end()) {
         qWarning() << "updateSessionPrompt: Session not found:" << id;
         return;
     }
-    it->second->setPrompt(prompt, echo);
+    it->second->setPrompt(prompt, echo, clearError);
     emitSessionEvent(it->second->toUpdatedEvent());
 }
 
@@ -294,6 +550,21 @@ void CAgent::updateSessionError(const QString& id, const QString& error) {
     emitSessionEvent(it->second->toUpdatedEvent());
 }
 
+void CAgent::updateSessionPinentryRetry(const QString& id, int curRetry, int maxRetries) {
+    auto it = m_sessions.find(id);
+    if (it == m_sessions.end()) {
+        qWarning() << "updateSessionPinentryRetry: Session not found:" << id;
+        return;
+    }
+
+    if (it->second->source() != Session::Source::Pinentry) {
+        qWarning() << "updateSessionPinentryRetry: Not a pinentry session:" << id;
+        return;
+    }
+
+    it->second->setPinentryRetry(curRetry, maxRetries);
+}
+
 QJsonObject CAgent::closeSession(const QString& id, Session::Result result, bool deferred) {
     auto it = m_sessions.find(id);
     if (it == m_sessions.end()) {
@@ -305,6 +576,10 @@ QJsonObject CAgent::closeSession(const QString& id, Session::Result result, bool
     QJsonObject event = it->second->toClosedEvent();
     m_sessions.erase(it);
 
+    if (m_sessions.empty()) {
+        recomputeActiveProvider();
+    }
+
     if (!deferred) {
         emitSessionEvent(event);
         return QJsonObject{};
@@ -315,4 +590,147 @@ QJsonObject CAgent::closeSession(const QString& id, Session::Result result, bool
 Session* CAgent::getSession(const QString& id) {
     auto it = m_sessions.find(id);
     return (it != m_sessions.end()) ? it->second.get() : nullptr;
+}
+
+bool CAgent::isSessionEventForProviderRouting(const QJsonObject& event) const {
+    const QString type = event.value("type").toString();
+    return type.startsWith("session.");
+}
+
+bool CAgent::isAuthorizedProviderSocket(QLocalSocket* socket) const {
+    if (m_uiProviders.isEmpty()) {
+        return true;
+    }
+
+    if (!m_uiProviders.contains(socket)) {
+        return false;
+    }
+
+    return socket == m_activeProvider;
+}
+
+bool CAgent::hasActiveProvider() const {
+    return m_activeProvider && m_uiProviders.contains(m_activeProvider);
+}
+
+bool CAgent::recomputeActiveProvider(bool emitStatusChange) {
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+
+    QLocalSocket* bestSocket = nullptr;
+    int           bestPriority = std::numeric_limits<int>::min();
+    qint64        bestHeartbeat = 0;
+
+    for (auto it = m_uiProviders.begin(); it != m_uiProviders.end();) {
+        QLocalSocket* socket = it.key();
+        const auto& provider = it.value();
+
+        const bool socketInvalid = (!socket || socket->state() != QLocalSocket::ConnectedState);
+        const bool stale = (nowMs - provider.lastHeartbeatMs) > PROVIDER_HEARTBEAT_TIMEOUT_MS;
+        if (socketInvalid || stale) {
+            it = m_uiProviders.erase(it);
+            continue;
+        }
+
+        if (!bestSocket || provider.priority > bestPriority ||
+            (provider.priority == bestPriority && provider.lastHeartbeatMs > bestHeartbeat)) {
+            bestSocket = socket;
+            bestPriority = provider.priority;
+            bestHeartbeat = provider.lastHeartbeatMs;
+        }
+
+        ++it;
+    }
+
+    if (m_activeProvider == bestSocket) {
+        return false;
+    }
+
+    m_activeProvider = bestSocket;
+    if (emitStatusChange) {
+        emitProviderStatus();
+    }
+
+    return true;
+}
+
+void CAgent::pruneStaleProviders() {
+    recomputeActiveProvider();
+
+    if (!hasActiveProvider() && !m_sessions.empty()) {
+        ensureFallbackUiRunning("provider-prune");
+    }
+}
+
+void CAgent::emitProviderStatus() {
+    QJsonObject status{
+        {"type", "ui.active"},
+        {"active", hasActiveProvider()}
+    };
+
+    if (hasActiveProvider()) {
+        const auto& provider = m_uiProviders[m_activeProvider];
+        status["id"] = provider.id;
+        status["name"] = provider.name;
+        status["kind"] = provider.kind;
+        status["priority"] = provider.priority;
+    }
+
+    QSet<QLocalSocket*> sent;
+
+    for (auto it = m_uiProviders.begin(); it != m_uiProviders.end(); ++it) {
+        QLocalSocket* socket = it.key();
+        if (socket && socket->isValid()) {
+            m_ipcServer.sendJson(socket, status);
+            sent.insert(socket);
+        }
+    }
+
+    for (auto* subscriber : m_subscribers) {
+        if (subscriber && subscriber->isValid() && !sent.contains(subscriber)) {
+            m_ipcServer.sendJson(subscriber, status);
+        }
+    }
+}
+
+void CAgent::ensureFallbackUiRunning(const QString& reason) {
+    if (hasActiveProvider()) {
+        return;
+    }
+
+    {
+        QProcess probe;
+        probe.start("pgrep", QStringList{"-u", QString::number(getuid()), "-f", "noctalia-auth-fallback"});
+        if (probe.waitForFinished(500) && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0) {
+            return;
+        }
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if ((nowMs - m_lastFallbackLaunchMs) < FALLBACK_LAUNCH_COOLDOWN_MS) {
+        return;
+    }
+
+    QString fallbackPath = QString::fromLocal8Bit(qgetenv("NOCTALIA_AUTH_FALLBACK_PATH"));
+    if (fallbackPath.isEmpty()) {
+        fallbackPath = QCoreApplication::applicationDirPath() + "/noctalia-auth-fallback";
+    }
+
+    const QFileInfo info(fallbackPath);
+    if (!info.exists() || !info.isExecutable()) {
+        qWarning() << "Fallback UI binary missing or not executable:" << fallbackPath;
+        return;
+    }
+
+    QStringList args;
+    if (!m_socketPath.isEmpty()) {
+        args << "--socket" << m_socketPath;
+    }
+
+    const bool launched = QProcess::startDetached(fallbackPath, args);
+    if (launched) {
+        m_lastFallbackLaunchMs = nowMs;
+        qInfo() << "Launched fallback UI due to" << reason;
+    } else {
+        qWarning() << "Failed to launch fallback UI:" << fallbackPath;
+    }
 }

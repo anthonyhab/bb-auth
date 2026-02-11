@@ -184,7 +184,7 @@ noctalia_ipc_send_keyring_request (const gchar *cookie,
 
     response = send_json_command (json_str);
     if (!response) {
-        g_warning ("Failed to connect to noctalia-polkit socket");
+        g_warning ("Failed to connect to noctalia-auth socket");
         return FALSE;
     }
 
@@ -228,7 +228,7 @@ noctalia_ipc_send_keyring_request (const gchar *cookie,
         return FALSE;
     }
 
-    g_warning ("Unexpected response from noctalia-polkit: %s", response);
+    g_warning ("Unexpected response from noctalia-auth: %s", response);
     return FALSE;
 }
 
@@ -319,7 +319,7 @@ noctalia_ipc_send_cancel (const gchar *cookie)
     builder = json_builder_new ();
     json_builder_begin_object (builder);
     json_builder_set_member_name (builder, "type");
-    json_builder_add_string_value (builder, "cancel");
+    json_builder_add_string_value (builder, "session.cancel");
     json_builder_set_member_name (builder, "id");
     json_builder_add_string_value (builder, cookie);
     json_builder_end_object (builder);

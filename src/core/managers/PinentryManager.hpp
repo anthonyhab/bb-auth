@@ -2,13 +2,14 @@
 
 #include "RequestTypes.hpp"
 #include "../RequestContext.hpp"
+#include "../Session.hpp"
 
 #include <QHash>
 #include <QObject>
+#include <QSet>
 #include <QTimer>
-#include <QSharedPointer>
 
-#include <optional>
+#include <utility>
 
 namespace noctalia {
 
@@ -22,44 +23,45 @@ namespace noctalia {
         // Process incoming pinentry request
         void handleRequest(const QJsonObject& msg, QLocalSocket* socket, pid_t peerPid);
 
-        // Process response - returns socket response
+        // Process response for pending user input
         struct ResponseResult {
-            QJsonObject                 socketResponse;
-            bool                        deferred = false;
+            QJsonObject socketResponse;
         };
         ResponseResult handleResponse(const QString& cookie, const QString& response);
+
+        // Process terminal result from pinentry mode
+        QJsonObject handleResult(const QJsonObject& msg, pid_t peerPid);
 
         // Process cancellation
         QJsonObject handleCancel(const QString& cookie);
 
-        // Check for retry
-        bool checkForRetry(const QString& keyinfo);
-
-        // Check ownership
-        bool          hasPendingRequest(const QString& cookie) const;
-        QLocalSocket* getSocketForRequest(const QString& cookie) const;
+        // Request state
+        bool          hasPendingInput(const QString& cookie) const;
+        bool          hasRequest(const QString& cookie) const;
+        bool          isAwaitingOutcome(const QString& cookie) const;
+        QLocalSocket* getSocketForPendingInput(const QString& cookie) const;
 
         // Cleanup
         void cleanupForSocket(QLocalSocket* socket);
 
-      signals:
-        // Emitted when a deferred completion fires
-        void deferredComplete(const QString& cookie, const QJsonObject& event);
-
       private:
-        struct DeferredCompletion {
-            QString                cookie;
-            QString                keyinfo;
-            QJsonObject            event;
-            QSharedPointer<QTimer> timer;
+        struct AwaitingOutcome {
+            PinentryRequest request;
+            QTimer*         timer = nullptr;
         };
 
-        void                               sendDeferredCompletion(const QString& cookie);
+        std::pair<int, int> resolveRetryInfo(const PinentryRequest& request);
+        bool                validateResultOwner(const QString& cookie, pid_t peerPid) const;
+
+        void cleanupAwaiting(const QString& cookie);
+        void closeFlow(const QString& cookie, Session::Result result, const QString& error = {});
 
         QHash<QString, PinentryRequest>    m_pendingRequests;
-        QHash<QString, DeferredCompletion> m_deferredCompletions; // keyed by keyinfo
-        QHash<QString, PinentryRetryInfo>  m_retryInfo;           // keyed by keyinfo
-        QHash<QLocalSocket*, QString>      m_socketKeyinfos;      // track keyinfo per socket
+        QHash<QString, AwaitingOutcome>    m_awaitingOutcome;
+        QHash<QString, PinentryRetryInfo>  m_retryInfo;
+        QHash<QString, pid_t>              m_flowOwners;
+        QHash<QString, QString>            m_flowKeyinfos;
+        QSet<QString>                      m_retryReported;
     };
 
 } // namespace noctalia

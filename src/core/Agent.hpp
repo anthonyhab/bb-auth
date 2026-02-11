@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QHash>
 #include <QLocalServer>
 #include <QPointer>
 #include <QQueue>
@@ -37,8 +39,20 @@ namespace noctalia {
         void handleSubscribe(QLocalSocket* socket);
         void handleKeyringRequest(QLocalSocket* socket, const QJsonObject& msg);
         void handlePinentryRequest(QLocalSocket* socket, const QJsonObject& msg);
+        void handlePinentryResult(QLocalSocket* socket, const QJsonObject& msg);
+        void handleUIRegister(QLocalSocket* socket, const QJsonObject& msg);
+        void handleUIHeartbeat(QLocalSocket* socket, const QJsonObject& msg);
+        void handleUIUnregister(QLocalSocket* socket, const QJsonObject& msg);
         void handleRespond(QLocalSocket* socket, const QJsonObject& msg);
         void handleCancel(QLocalSocket* socket, const QJsonObject& msg);
+
+        bool isSessionEventForProviderRouting(const QJsonObject& event) const;
+        bool isAuthorizedProviderSocket(QLocalSocket* socket) const;
+        bool hasActiveProvider() const;
+        bool recomputeActiveProvider(bool emitStatusChange = true);
+        void pruneStaleProviders();
+        void emitProviderStatus();
+        void ensureFallbackUiRunning(const QString& reason);
 
         // Polkit event handlers (called directly by PolkitListener)
         void onPolkitCompleted(bool gainedAuthorization);
@@ -55,8 +69,9 @@ namespace noctalia {
 
         // Centralized session management - used by all managers
         void createSession(const QString& id, Session::Source source, Session::Context ctx);
-        void updateSessionPrompt(const QString& id, const QString& prompt, bool echo = false);
+        void updateSessionPrompt(const QString& id, const QString& prompt, bool echo = false, bool clearError = true);
         void updateSessionError(const QString& id, const QString& error);
+        void updateSessionPinentryRetry(const QString& id, int curRetry, int maxRetries);
         // Returns closed event if deferred=true, otherwise emits immediately and returns empty object
         QJsonObject closeSession(const QString& id, Session::Result result, bool deferred = false);
         Session* getSession(const QString& id);
@@ -79,6 +94,20 @@ namespace noctalia {
 
         // Active subscribers
         QList<QLocalSocket*> m_subscribers;
+
+        struct UIProvider {
+            QString id;
+            QString name;
+            QString kind;
+            int     priority = 0;
+            qint64  lastHeartbeatMs = 0;
+        };
+
+        QHash<QLocalSocket*, UIProvider> m_uiProviders;
+        QPointer<QLocalSocket>           m_activeProvider;
+        QTimer                           m_providerMaintenanceTimer;
+        QString                          m_socketPath;
+        qint64                           m_lastFallbackLaunchMs = 0;
 
         void processNextWaiter();
     };

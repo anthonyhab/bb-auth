@@ -1,21 +1,10 @@
 {
-  description = "A polkit authentication agent written in QT/QML";
+  description = "Unified polkit, keyring, and pinentry authentication daemon";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     systems.url = "github:nix-systems/default-linux";
 
-    hyprutils = {
-      url = "github:hyprwm/hyprutils";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.systems.follows = "systems";
-    };
-
-    hyprland-qt-support = {
-      url = "github:hyprwm/hyprland-qt-support";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.systems.follows = "systems";
-    };
   };
 
   outputs = {
@@ -37,14 +26,14 @@
     overlays = import ./nix/overlays.nix {inherit inputs self lib;};
 
     packages = eachSystem (system: {
-      default = self.packages.${system}."noctalia-polkit";
-      inherit (pkgsFor.${system}) "noctalia-polkit";
+      default = self.packages.${system}."noctalia-auth";
+      inherit (pkgsFor.${system}) "noctalia-auth";
     });
 
     devShells = eachSystem (system: {
       default = import ./nix/shell.nix {
         pkgs = pkgsFor.${system};
-        noctaliaPolkit = pkgsFor.${system}."noctalia-polkit";
+        noctaliaAuth = pkgsFor.${system}."noctalia-auth";
       };
     });
   };

@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_NAME="noctalia-auth-bootstrap"
+EXPECTED_PINENTRY="${NOCTALIA_AUTH_PINENTRY_PATH:-@LIBEXECDIR@/pinentry-noctalia}"
+MODE="${NOCTALIA_AUTH_CONFLICT_MODE:-session}"
+
+if [ "${1:-}" = "--mode" ] && [ -n "${2:-}" ]; then
+    MODE="$2"
+fi
+
+log() {
+    printf '[%s] %s\n' "$SCRIPT_NAME" "$*"
+}
+
+canonical_mode() {
+    case "$1" in
+        warn|session|persistent)
+            printf '%s' "$1"
+            ;;
+        *)
+            printf '%s' "session"
+            ;;
+    esac
+}
+
+MODE="$(canonical_mode "$MODE")"
+
+ensure_gpg_pinentry() {
+    local gpg_dir="$HOME/.gnupg"
+    local gpg_conf="$gpg_dir/gpg-agent.conf"
+    local changed=0
+
+    mkdir -p "$gpg_dir"
+    chmod 700 "$gpg_dir"
+
+    if [ ! -f "$gpg_conf" ]; then
+        printf 'pinentry-program %s\n' "$EXPECTED_PINENTRY" > "$gpg_conf"
+        chmod 600 "$gpg_conf"
+        log "created gpg-agent.conf with canonical pinentry path"
+        return 1
+    fi
+
+    local current
+    current="$(grep -E '^[[:space:]]*pinentry-program[[:space:]]+' "$gpg_conf" | tail -n 1 | sed -E 's/^[[:space:]]*pinentry-program[[:space:]]+//' || true)"
+
+    if [ -z "$current" ]; then
+        cp -a "$gpg_conf" "$gpg_conf.bak.$(date +%s)"
+        printf '\npinentry-program %s\n' "$EXPECTED_PINENTRY" >> "$gpg_conf"
+        chmod 600 "$gpg_conf"
+        log "added missing pinentry-program to gpg-agent.conf"
+        changed=1
+    elif [ "$current" != "$EXPECTED_PINENTRY" ]; then
+        cp -a "$gpg_conf" "$gpg_conf.bak.$(date +%s)"
+        local tmp
+        tmp="$(mktemp)"
+        awk -v replacement="pinentry-program $EXPECTED_PINENTRY" '
+            BEGIN { replaced = 0 }
+            /^[[:space:]]*pinentry-program[[:space:]]+/ {
+                if (!replaced) {
+                    print replacement
+                    replaced = 1
+                }
+                next
+            }
+            { print }
+            END {
+                if (!replaced)
+                    print replacement
+            }
+        ' "$gpg_conf" > "$tmp"
+        mv "$tmp" "$gpg_conf"
+        chmod 600 "$gpg_conf"
+        log "updated pinentry-program from '$current' to '$EXPECTED_PINENTRY'"
+        changed=1
+    fi
+
+    if [ "$changed" -eq 1 ]; then
+        return 1
+    fi
+
+    return 0
+}
+
+restart_gpg_agent_if_needed() {
+    if ! command -v gpgconf >/dev/null 2>&1; then
+        log "gpgconf not found, skipped gpg-agent reload"
+        return
+    fi
+
+    gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+    gpgconf --launch gpg-agent >/dev/null 2>&1 || true
+    log "reloaded gpg-agent"
+}
+
+stop_competing_processes() {
+    if [ "$MODE" = "warn" ]; then
+        return
+    fi
+
+    local agents=(
+        'polkit-gnome-authentication-agent-1'
+        'lxqt-policykit-agent'
+        'mate-polkit'
+        'xfce-polkit'
+        'polkit-kde-authentication-agent-1'
+        'hyprpolkitagent'
+    )
+
+    local uid
+    uid="$(id -u)"
+
+    local agent
+    for agent in "${agents[@]}"; do
+        local matches
+        matches="$(pgrep -u "$uid" -x "$agent" 2>/dev/null || true)"
+        if [ -z "$matches" ]; then
+            matches="$(pgrep -u "$uid" -f "(^|/)$agent( |$)" || true)"
+        fi
+        if [ -z "$matches" ]; then
+            continue
+        fi
+
+        local pids=()
+        local pid
+        for pid in $matches; do
+            if [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ]; then
+                continue
+            fi
+            pids+=("$pid")
+        done
+
+        if [ "${#pids[@]}" -eq 0 ]; then
+            continue
+        fi
+
+        log "stopping competing agent '$agent' (pids: ${pids[*]})"
+        kill "${pids[@]}" >/dev/null 2>&1 || true
+    done
+}
+
+manage_competing_services() {
+    if [ "$MODE" = "warn" ]; then
+        return
+    fi
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        return
+    fi
+
+    local services=(
+        'polkit-gnome-authentication-agent-1.service'
+        'lxqt-policykit-agent.service'
+        'mate-polkit.service'
+        'xfce-polkit.service'
+        'polkit-kde-authentication-agent-1.service'
+        'hyprpolkitagent.service'
+    )
+
+    local svc
+    for svc in "${services[@]}"; do
+        if systemctl --user --quiet is-active "$svc"; then
+            systemctl --user stop "$svc" >/dev/null 2>&1 || true
+            log "stopped competing user service '$svc'"
+        fi
+
+        if [ "$MODE" = "persistent" ] && systemctl --user --quiet is-enabled "$svc"; then
+            systemctl --user disable "$svc" >/dev/null 2>&1 || true
+            log "disabled competing user service '$svc'"
+        fi
+    done
+}
+
+apply_autostart_overrides() {
+    if [ "$MODE" != "persistent" ]; then
+        return
+    fi
+
+    local autostart_dir="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+    local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/noctalia-auth/autostart-backups"
+    mkdir -p "$autostart_dir"
+    mkdir -p "$state_dir"
+
+    local desktop_files=(
+        'polkit-gnome-authentication-agent-1.desktop'
+        'lxqt-policykit-agent.desktop'
+        'mate-polkit.desktop'
+        'xfce-polkit.desktop'
+        'org.kde.polkit-kde-authentication-agent-1.desktop'
+        'hyprpolkitagent.desktop'
+    )
+
+    local file
+    for file in "${desktop_files[@]}"; do
+        if [ -f "/etc/xdg/autostart/$file" ] || [ -f "$autostart_dir/$file" ]; then
+            if [ -f "$autostart_dir/$file" ] && ! grep -q 'X-Noctalia-Managed=true' "$autostart_dir/$file"; then
+                cp -a "$autostart_dir/$file" "$state_dir/${file}.bak"
+                log "backed up user autostart file '$autostart_dir/$file'"
+            fi
+
+            cat > "$autostart_dir/$file" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Disabled by noctalia-auth
+Hidden=true
+X-GNOME-Autostart-enabled=false
+X-Noctalia-Managed=true
+EOF
+            log "created persistent autostart override for '$file'"
+        fi
+    done
+}
+
+write_state_report() {
+    local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/noctalia-auth"
+    local state_file="$state_dir/bootstrap-state.env"
+    mkdir -p "$state_dir"
+
+    cat > "$state_file" <<EOF
+timestamp=$(date +%s)
+mode=$MODE
+pinentry_path=$EXPECTED_PINENTRY
+EOF
+}
+
+main() {
+    log "starting bootstrap (mode: $MODE)"
+
+    if ensure_gpg_pinentry; then
+        :
+    else
+        restart_gpg_agent_if_needed
+    fi
+
+    stop_competing_processes
+    manage_competing_services
+    apply_autostart_overrides
+    write_state_report
+
+    log "bootstrap complete"
+}
+
+main "$@"

@@ -3,8 +3,6 @@
   stdenv,
   cmake,
   pkg-config,
-  hyprutils,
-  hyprland-qt-support,
   kdePackages,
   polkit,
   qt6,
@@ -17,7 +15,7 @@
   inherit (lib.strings) hasSuffix;
 in
   stdenv.mkDerivation {
-    pname = "noctalia-polkit";
+    pname = "noctalia-auth";
     inherit version;
 
     src = cleanSourceWith {
@@ -35,13 +33,9 @@ in
     ];
 
     buildInputs = [
-      hyprutils
-      hyprland-qt-support
       polkit
       kdePackages.polkit-qt-1
       qt6.qtbase
-      qt6.qtsvg
-      qt6.qtwayland
       # For keyring-prompter
       gcr_4
       glib
@@ -49,11 +43,11 @@ in
     ];
 
     meta = {
-      description = "A polkit authentication agent and keyring prompter";
+      description = "Unified polkit, keyring, and pinentry authentication daemon";
       homepage = "https://github.com/anthonyhab/noctalia-polkit";
       license = lib.licenses.bsd3;
       maintainers = [lib.maintainers.fufexan];
-      mainProgram = "noctalia-polkit";
+      mainProgram = "noctalia-auth";
       platforms = lib.platforms.linux;
     };
   }

@@ -2,220 +2,345 @@
 #include "../Agent.hpp"
 #include "../../common/Constants.hpp"
 
-#include <QJsonDocument>
+#include <QDebug>
+#include <QList>
 #include <QRegularExpression>
 #include <QUuid>
 
+#include <optional>
+#include <unistd.h>
+
 namespace noctalia {
 
-    PinentryManager::PinentryManager(QObject* parent) : QObject(parent) {}
+namespace {
 
-    PinentryManager::~PinentryManager() = default;
+PinentryRequest parsePinentryRequest(const QJsonObject& msg, QLocalSocket* socket, pid_t peerPid) {
+    PinentryRequest request;
+    request.cookie = msg.value("cookie").toString();
+    request.socket = socket;
+    request.peerPid = peerPid;
 
-    void PinentryManager::handleRequest(const QJsonObject& msg, QLocalSocket* socket, pid_t peerPid) {
-        QString cookie = msg.value("cookie").toString();
-        if (cookie.isEmpty()) {
-            cookie = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        }
+    request.prompt = msg.value("prompt").toString();
+    if (request.prompt.isEmpty()) {
+        request.prompt = "Enter passphrase:";
+    }
 
-        PinentryRequest request;
-        request.cookie      = cookie;
-        request.socket      = socket;
-        request.peerPid     = peerPid;
-        request.prompt      = msg.value("prompt").toString();
-        request.description = msg.value("description").toString();
-        request.error       = msg.value("error").toString();
-        request.keyinfo     = msg.value("keyinfo").toString();
-        request.repeat      = msg.value("repeat").toBool();
-        request.confirmOnly = msg.value("confirm_only").toBool();
+    request.description = msg.value("description").toString();
 
-        // Track keyinfo for this socket
-        if (!request.keyinfo.isEmpty()) {
-            m_socketKeyinfos[socket] = request.keyinfo;
+    request.error = msg.value("error").toString();
 
-            // Check if this is a retry
-            checkForRetry(request.keyinfo);
-        }
+    request.keyinfo = msg.value("keyinfo").toString();
 
-        m_pendingRequests[cookie] = request;
+    request.repeat = msg.value("repeat").toBool();
 
-        // Resolve requestor
-        std::optional<ProcInfo> proc = RequestContextHelper::readProc(peerPid);
-        ActorInfo               actor;
-        if (proc) {
-            actor = RequestContextHelper::resolveRequestorFromSubject(*proc, getuid());
-        }
+    request.confirmOnly = msg.value("confirm_only").toBool();
 
-        // Parse retry info from description if present
-        int                             curRetry = 0, maxRetries = 0;
-        static const QRegularExpression retryRe(R"(\((\d+)\s+of\s+(\d+)\s+attempts\))");
-        auto                            match = retryRe.match(request.description);
-        if (match.hasMatch()) {
-            curRetry   = match.captured(1).toInt();
-            maxRetries = match.captured(2).toInt();
+    return request;
+}
 
-            // Update retry info
-            if (!request.keyinfo.isEmpty()) {
-                auto& info      = m_retryInfo[request.keyinfo];
-                info.keyinfo    = request.keyinfo;
-                info.curRetry   = curRetry;
-                info.maxRetries = maxRetries;
-            }
-        }
+ActorInfo resolveActorForPid(pid_t peerPid) {
+    std::optional<ProcInfo> proc = RequestContextHelper::readProc(peerPid);
+    if (!proc) {
+        return {};
+    }
 
-        noctalia::Session::Context ctx;
+    return RequestContextHelper::resolveRequestorFromSubject(*proc, getuid());
+}
+
+} // namespace
+
+PinentryManager::PinentryManager(QObject* parent) : QObject(parent) {}
+
+PinentryManager::~PinentryManager() = default;
+
+void PinentryManager::handleRequest(const QJsonObject& msg, QLocalSocket* socket, pid_t peerPid) {
+    PinentryRequest request = parsePinentryRequest(msg, socket, peerPid);
+    if (request.cookie.isEmpty()) {
+        request.cookie = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+
+    const QString cookie = request.cookie;
+
+    if (m_flowOwners.contains(cookie) && m_flowOwners.value(cookie) != peerPid) {
+        qWarning() << "Pinentry owner mismatch for cookie" << cookie << "expected pid"
+                   << m_flowOwners.value(cookie) << "got" << peerPid;
+        return;
+    }
+
+    m_flowOwners[cookie] = peerPid;
+    if (!request.keyinfo.isEmpty()) {
+        m_flowKeyinfos[cookie] = request.keyinfo;
+    }
+
+    const auto [curRetry, maxRetries] = resolveRetryInfo(request);
+    const bool sessionExists = g_pAgent->getSession(cookie) != nullptr;
+
+    if (m_awaitingOutcome.contains(cookie)) {
+        cleanupAwaiting(cookie);
+        const QString retryError = request.error.isEmpty() ? QString("Authentication failed") : request.error;
+        g_pAgent->updateSessionError(cookie, retryError);
+    }
+
+    m_pendingRequests[cookie] = request;
+
+    if (!sessionExists) {
+        const ActorInfo actor = resolveActorForPid(peerPid);
+
+        Session::Context ctx;
         ctx.message = request.prompt;
         ctx.description = request.description;
         ctx.keyinfo = request.keyinfo;
-        ctx.curRetry = curRetry > 0 ? curRetry : (request.keyinfo.isEmpty() ? 0 : m_retryInfo[request.keyinfo].curRetry);
-        ctx.maxRetries = maxRetries > 0 ? maxRetries : 3;
+        ctx.curRetry = curRetry;
+        ctx.maxRetries = maxRetries;
         ctx.confirmOnly = request.confirmOnly;
         ctx.repeat = request.repeat;
         ctx.requestor.name = actor.displayName;
         ctx.requestor.icon = actor.iconName;
         ctx.requestor.fallbackLetter = actor.fallbackLetter;
+        ctx.requestor.fallbackKey = actor.fallbackKey;
         ctx.requestor.pid = peerPid;
 
-        // Use centralized session management
-        g_pAgent->createSession(cookie, noctalia::Session::Source::Pinentry, ctx);
-        g_pAgent->updateSessionPrompt(cookie, request.prompt, false);
-        if (!request.error.isEmpty()) {
-            g_pAgent->updateSessionError(cookie, request.error);
-        }
+        g_pAgent->createSession(cookie, Session::Source::Pinentry, ctx);
+    } else {
+        g_pAgent->updateSessionPinentryRetry(cookie, curRetry, maxRetries);
     }
 
-    PinentryManager::ResponseResult PinentryManager::handleResponse(const QString& cookie, const QString& response) {
-        auto it = m_pendingRequests.find(cookie);
-        if (it == m_pendingRequests.end()) {
-            return {QJsonObject{{"type", "error"}, {"message", "Unknown cookie"}}, false};
+    g_pAgent->updateSessionPrompt(cookie, request.prompt, false, false);
+
+    bool shouldEmitRequestError = !request.error.isEmpty();
+    if (m_retryReported.contains(cookie)) {
+        if (shouldEmitRequestError) {
+            shouldEmitRequestError = false;
         }
-
-        PinentryRequest request = it.value();
-        m_pendingRequests.erase(it);
-
-        // Build response in format expected by pinentry.cpp
-        QJsonObject socketResponse;
-        socketResponse["type"] = "pinentry_response";
-        socketResponse["id"] = cookie;
-        if (request.confirmOnly) {
-            socketResponse["result"] = "confirmed";
-        } else {
-            socketResponse["result"] = "ok";
-            socketResponse["password"] = response;
-        }
-        
-        // Defer completion if we have keyinfo (to detect retries)
-        if (!request.keyinfo.isEmpty()) {
-            auto& deferred   = m_deferredCompletions[request.keyinfo];
-            deferred.cookie  = cookie;
-            deferred.keyinfo = request.keyinfo;
-
-            // Close session but defer emitting the event
-            deferred.event = g_pAgent->closeSession(cookie, noctalia::Session::Result::Success, true);
-
-            deferred.timer   = QSharedPointer<QTimer>::create();
-            deferred.timer->setSingleShot(true);
-
-            // Determine delay based on retry status
-            int  delay   = PINENTRY_DEFERRED_DELAY_MS;
-            auto retryIt = m_retryInfo.find(request.keyinfo);
-            if (retryIt != m_retryInfo.end() && retryIt->curRetry > 0) {
-                delay = PINENTRY_DEFERRED_DELAY_RETRY_MS;
-            }
-
-            connect(deferred.timer.get(), &QTimer::timeout, this, [this, cookie]() { sendDeferredCompletion(cookie); });
-            deferred.timer->start(delay);
-
-            return {socketResponse, true};
-        }
-
-        // No keyinfo - close immediately
-        g_pAgent->closeSession(cookie, noctalia::Session::Result::Success);
-
-        return {socketResponse, false};
+        m_retryReported.remove(cookie);
     }
 
-    QJsonObject PinentryManager::handleCancel(const QString& cookie) {
-        auto it = m_pendingRequests.find(cookie);
-        if (it == m_pendingRequests.end()) {
-            return QJsonObject{{"type", "error"}, {"message", "Unknown cookie"}};
+    if (shouldEmitRequestError) {
+        g_pAgent->updateSessionError(cookie, request.error);
+    }
+}
+
+PinentryManager::ResponseResult PinentryManager::handleResponse(const QString& cookie, const QString& response) {
+    auto pendingIt = m_pendingRequests.find(cookie);
+    if (pendingIt == m_pendingRequests.end()) {
+        if (m_awaitingOutcome.contains(cookie)) {
+            return {QJsonObject{{"type", "error"}, {"message", "Session is already awaiting terminal result"}}};
         }
+        return {QJsonObject{{"type", "error"}, {"message", "Unknown session"}}};
+    }
 
-        m_pendingRequests.erase(it);
+    PinentryRequest request = pendingIt.value();
+    m_pendingRequests.erase(pendingIt);
 
-        // Close session via Agent
-        g_pAgent->closeSession(cookie, noctalia::Session::Result::Cancelled);
+    QJsonObject socketResponse;
+    socketResponse["type"] = "pinentry_response";
+    socketResponse["id"] = cookie;
+    if (request.confirmOnly) {
+        socketResponse["result"] = "confirmed";
+    } else {
+        socketResponse["result"] = "ok";
+        socketResponse["password"] = response;
+    }
 
+    cleanupAwaiting(cookie);
+
+    auto* timer = new QTimer(this);
+    timer->setSingleShot(true);
+    connect(timer, &QTimer::timeout, this, [this, cookie]() {
+        closeFlow(cookie, Session::Result::Error, "Pinentry did not report terminal result");
+    });
+
+    AwaitingOutcome awaiting;
+    awaiting.request = request;
+    awaiting.timer = timer;
+    m_awaitingOutcome[cookie] = awaiting;
+    timer->start(PINENTRY_RESULT_TIMEOUT_MS);
+
+    return {socketResponse};
+}
+
+QJsonObject PinentryManager::handleResult(const QJsonObject& msg, pid_t peerPid) {
+    const QString cookie = msg.value("id").toString();
+    if (cookie.isEmpty()) {
+        return QJsonObject{{"type", "error"}, {"message", "Missing id"}};
+    }
+
+    if (!validateResultOwner(cookie, peerPid)) {
+        return QJsonObject{{"type", "error"}, {"message", "Result sender does not own session"}};
+    }
+
+    Session* session = g_pAgent->getSession(cookie);
+    if (!session || session->source() != Session::Source::Pinentry) {
+        return QJsonObject{{"type", "error"}, {"message", "Unknown pinentry session"}};
+    }
+
+    const QString result = msg.value("result").toString().toLower();
+    const QString error = msg.value("error").toString();
+
+    if (result == "success") {
+        closeFlow(cookie, Session::Result::Success);
+        return QJsonObject{{"type", "ok"}};
+    }
+
+    if (result == "retry") {
+        cleanupAwaiting(cookie);
+        const QString reason = error.isEmpty() ? QString("Authentication failed") : error;
+        m_retryReported.insert(cookie);
+        g_pAgent->updateSessionError(cookie, reason);
+        return QJsonObject{{"type", "ok"}};
+    }
+
+    if (result == "cancelled" || result == "canceled") {
+        closeFlow(cookie, Session::Result::Cancelled);
+        return QJsonObject{{"type", "ok"}};
+    }
+
+    if (result == "error") {
+        const QString reason = error.isEmpty() ? QString("Authentication failed") : error;
+        closeFlow(cookie, Session::Result::Error, reason);
+        return QJsonObject{{"type", "ok"}};
+    }
+
+    return QJsonObject{{"type", "error"}, {"message", "Invalid result type"}};
+}
+
+QJsonObject PinentryManager::handleCancel(const QString& cookie) {
+    Session* session = g_pAgent->getSession(cookie);
+
+    if (m_pendingRequests.contains(cookie)) {
+        closeFlow(cookie, Session::Result::Cancelled);
         return QJsonObject{{"type", "pinentry_response"}, {"id", cookie}, {"result", "cancelled"}};
     }
 
-    bool PinentryManager::checkForRetry(const QString& keyinfo) {
-        auto it = m_deferredCompletions.find(keyinfo);
-        if (it == m_deferredCompletions.end()) {
-            return false;
-        }
+    if (m_awaitingOutcome.contains(cookie)) {
+        closeFlow(cookie, Session::Result::Cancelled);
+        return QJsonObject{{"type", "pinentry_response"}, {"id", cookie}, {"result", "cancelled"}};
+    }
 
-        // Cancel the deferred completion - this is a retry
-        it->timer->stop();
-        m_deferredCompletions.erase(it);
+    if (session && session->source() == Session::Source::Pinentry) {
+        closeFlow(cookie, Session::Result::Cancelled);
+        return QJsonObject{{"type", "pinentry_response"}, {"id", cookie}, {"result", "cancelled"}};
+    }
 
-        // Update retry counter
-        auto& retry   = m_retryInfo[keyinfo];
-        retry.keyinfo = keyinfo;
-        retry.curRetry++;
+    return QJsonObject{{"type", "error"}, {"message", "Unknown session"}};
+}
 
+bool PinentryManager::hasPendingInput(const QString& cookie) const {
+    return m_pendingRequests.contains(cookie);
+}
+
+bool PinentryManager::hasRequest(const QString& cookie) const {
+    if (m_pendingRequests.contains(cookie) || m_awaitingOutcome.contains(cookie)) {
         return true;
     }
 
-    bool PinentryManager::hasPendingRequest(const QString& cookie) const {
-        return m_pendingRequests.contains(cookie);
+    Session* session = g_pAgent->getSession(cookie);
+    return session && session->source() == Session::Source::Pinentry;
+}
+
+bool PinentryManager::isAwaitingOutcome(const QString& cookie) const {
+    return m_awaitingOutcome.contains(cookie);
+}
+
+QLocalSocket* PinentryManager::getSocketForPendingInput(const QString& cookie) const {
+    auto it = m_pendingRequests.find(cookie);
+    if (it == m_pendingRequests.end()) {
+        return nullptr;
     }
 
-    QLocalSocket* PinentryManager::getSocketForRequest(const QString& cookie) const {
-        auto it = m_pendingRequests.find(cookie);
-        return (it != m_pendingRequests.end()) ? it->socket : nullptr;
-    }
+    return it->socket;
+}
 
-    void PinentryManager::cleanupForSocket(QLocalSocket* socket) {
-        // Clean pending requests
-        for (auto it = m_pendingRequests.begin(); it != m_pendingRequests.end();) {
-            if (it->socket == socket) {
-                QString cookie = it->cookie;
-                it = m_pendingRequests.erase(it);
-
-                // Close session via Agent
-                g_pAgent->closeSession(cookie, noctalia::Session::Result::Cancelled);
-            } else {
-                ++it;
-            }
-        }
-
-        // Clean socket keyinfo tracking
-        auto keyinfoIt = m_socketKeyinfos.find(socket);
-        if (keyinfoIt != m_socketKeyinfos.end()) {
-            const QString keyinfo = keyinfoIt.value();
-            m_socketKeyinfos.erase(keyinfoIt);
-
-            // If there's a deferred completion for this keyinfo, emit session.closed now
-            // (the pinentry client disconnected before the deferred timer fired)
-            auto deferredIt = m_deferredCompletions.find(keyinfo);
-            if (deferredIt != m_deferredCompletions.end()) {
-                deferredIt->timer->stop();
-                g_pAgent->emitSessionEvent(deferredIt->event);
-                m_deferredCompletions.erase(deferredIt);
-            }
+void PinentryManager::cleanupForSocket(QLocalSocket* socket) {
+    QList<QString> cookiesToClose;
+    for (auto it = m_pendingRequests.cbegin(); it != m_pendingRequests.cend(); ++it) {
+        if (it->socket == socket) {
+            cookiesToClose.push_back(it.key());
         }
     }
 
-    void PinentryManager::sendDeferredCompletion(const QString& cookie) {
-        // Find by cookie in deferred completions
-        for (auto it = m_deferredCompletions.begin(); it != m_deferredCompletions.end(); ++it) {
-            if (it->cookie == cookie) {
-                g_pAgent->emitSessionEvent(it->event);
-                m_deferredCompletions.erase(it);
-                return;
-            }
+    for (const QString& cookie : cookiesToClose) {
+        closeFlow(cookie, Session::Result::Cancelled, "Pinentry disconnected");
+    }
+}
+
+std::pair<int, int> PinentryManager::resolveRetryInfo(const PinentryRequest& request) {
+    int curRetry = 0;
+    int maxRetries = 3;
+    bool parsed = false;
+
+    static const QRegularExpression retryRe(R"(\((\d+)\s+of\s+(\d+)\s+attempts\))");
+    const auto match = retryRe.match(request.description);
+    if (match.hasMatch()) {
+        curRetry = match.captured(1).toInt();
+        maxRetries = match.captured(2).toInt();
+        parsed = true;
+    }
+
+    if (!request.keyinfo.isEmpty()) {
+        auto& info = m_retryInfo[request.keyinfo];
+        info.keyinfo = request.keyinfo;
+
+        if (parsed) {
+            info.curRetry = curRetry;
+            info.maxRetries = maxRetries;
+        } else {
+            curRetry = info.curRetry;
+            maxRetries = info.maxRetries > 0 ? info.maxRetries : 3;
         }
     }
+
+    if (curRetry < 0) {
+        curRetry = 0;
+    }
+    if (maxRetries <= 0) {
+        maxRetries = 3;
+    }
+
+    return {curRetry, maxRetries};
+}
+
+bool PinentryManager::validateResultOwner(const QString& cookie, pid_t peerPid) const {
+    auto ownerIt = m_flowOwners.find(cookie);
+    if (ownerIt == m_flowOwners.end()) {
+        return true;
+    }
+
+    return ownerIt.value() == peerPid;
+}
+
+void PinentryManager::cleanupAwaiting(const QString& cookie) {
+    auto it = m_awaitingOutcome.find(cookie);
+    if (it == m_awaitingOutcome.end()) {
+        return;
+    }
+
+    if (it->timer) {
+        it->timer->stop();
+        it->timer->deleteLater();
+    }
+
+    m_awaitingOutcome.erase(it);
+}
+
+void PinentryManager::closeFlow(const QString& cookie, Session::Result result, const QString& error) {
+    Session* session = g_pAgent->getSession(cookie);
+    if (session && session->source() == Session::Source::Pinentry) {
+        if (!error.isEmpty()) {
+            g_pAgent->updateSessionError(cookie, error);
+        }
+        g_pAgent->closeSession(cookie, result);
+    }
+
+    m_pendingRequests.remove(cookie);
+    cleanupAwaiting(cookie);
+    m_flowOwners.remove(cookie);
+    m_retryReported.remove(cookie);
+
+    const QString keyinfo = m_flowKeyinfos.take(cookie);
+    if (!keyinfo.isEmpty()) {
+        m_retryInfo.remove(keyinfo);
+    }
+}
 
 } // namespace noctalia

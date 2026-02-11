@@ -190,7 +190,7 @@ password_request_thread (GTask        *task,
     g_message ("Thread: Sending keyring password request: cookie=%s",
                self->request_cookie);
 
-    /* Send request to noctalia-polkit - this blocks until user responds */
+    /* Send request to noctalia-auth - this blocks until user responds */
     success = noctalia_ipc_send_keyring_request (
         self->request_cookie,
         self->title ? self->title : "Unlock Keyring",
@@ -270,7 +270,7 @@ confirm_request_thread (GTask        *task,
     g_message ("Thread: Sending keyring confirm request: cookie=%s",
                self->request_cookie);
 
-    /* Send confirm request to noctalia-polkit */
+    /* Send confirm request to noctalia-auth */
     confirmed = noctalia_ipc_send_confirm_request (
         self->request_cookie,
         self->title ? self->title : "Confirm",

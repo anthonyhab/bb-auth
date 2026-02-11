@@ -94,7 +94,7 @@ namespace {
         if (parser.isSet(optNext)) {
             noctalia::IpcClient client(socketPath);
             auto                response = client.sendRequest(QJsonObject{{"type", "next"}}, 1000);
-            if (response && response->value("type").toString() != "empty") {
+            if (response) {
                 const auto out = QJsonDocument(*response).toJson(QJsonDocument::Compact);
                 fprintf(stdout, "%s\n", out.constData());
             }
@@ -107,7 +107,7 @@ namespace {
             const QString       password = stdinStream.readLine();
 
             noctalia::IpcClient client(socketPath);
-            auto                response = client.sendRequest(QJsonObject{{"type", "respond"}, {"id", cookie}, {"response", password}}, 1000);
+            auto                response = client.sendRequest(QJsonObject{{"type", "session.respond"}, {"id", cookie}, {"response", password}}, 1000);
             return (response && response->value("type").toString() == "ok") ? 0 : 1;
         }
 
@@ -115,7 +115,7 @@ namespace {
             const QString       cookie = parser.value(optCancel);
 
             noctalia::IpcClient client(socketPath);
-            auto                response = client.sendRequest(QJsonObject{{"type", "cancel"}, {"id", cookie}}, 1000);
+            auto                response = client.sendRequest(QJsonObject{{"type", "session.cancel"}, {"id", cookie}}, 1000);
             return (response && response->value("type").toString() == "ok") ? 0 : 1;
         }
 

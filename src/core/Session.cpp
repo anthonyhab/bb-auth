@@ -8,21 +8,34 @@ Session::Session(const QString& id, Source source, Context context)
     , m_context(std::move(context))
 {}
 
-void Session::setPrompt(const QString& prompt, bool echo) {
+void Session::setPrompt(const QString& prompt, bool echo, bool clearError) {
     m_prompt = prompt;
     m_echo = echo;
     m_state = State::Prompting;
-    // Clear error when setting new prompt
-    m_error.clear();
+    if (clearError) {
+        m_error.clear();
+    }
 }
 
 void Session::setError(const QString& error) {
     m_error = error;
 }
 
+void Session::setPinentryRetry(int curRetry, int maxRetries) {
+    if (m_source != Source::Pinentry) {
+        return;
+    }
+
+    m_context.curRetry = curRetry < 0 ? 0 : curRetry;
+    m_context.maxRetries = maxRetries > 0 ? maxRetries : 3;
+}
+
 void Session::close(Result result) {
     m_result = result;
     m_state = State::Closed;
+    if (result == Result::Success) {
+        m_error.clear();
+    }
 }
 
 QString Session::sourceToString(Source s) {
@@ -49,6 +62,11 @@ QJsonObject Session::requestorToJson() const {
         {"icon", m_context.requestor.icon},
         {"fallbackLetter", m_context.requestor.fallbackLetter}
     };
+
+    if (!m_context.requestor.fallbackKey.isEmpty()) {
+        obj["fallbackKey"] = m_context.requestor.fallbackKey;
+    }
+
     if (m_context.requestor.pid > 0) {
         obj["pid"] = m_context.requestor.pid;
     }
@@ -114,6 +132,11 @@ QJsonObject Session::toUpdatedEvent() const {
         {"prompt", m_prompt},
         {"echo", m_echo}
     };
+
+    if (m_source == Source::Pinentry) {
+        event["curRetry"] = m_context.curRetry;
+        event["maxRetries"] = m_context.maxRetries;
+    }
     
     if (!m_error.isEmpty()) {
         event["error"] = m_error;
@@ -123,11 +146,17 @@ QJsonObject Session::toUpdatedEvent() const {
 }
 
 QJsonObject Session::toClosedEvent() const {
-    return QJsonObject{
+    QJsonObject event{
         {"type", "session.closed"},
         {"id", m_id},
         {"result", resultToString(m_result.value_or(Result::Error))}
     };
+
+    if (!m_error.isEmpty()) {
+        event["error"] = m_error;
+    }
+
+    return event;
 }
 
 } // namespace noctalia

@@ -5,7 +5,7 @@
 
 G_BEGIN_DECLS
 
-/* Check if noctalia-polkit socket is available */
+/* Check if noctalia-auth socket is available */
 gboolean noctalia_ipc_ping (void);
 
 /* Send a keyring password request, blocks until response received

@@ -1,70 +1,124 @@
-# noctalia-polkit
-A polkit authentication agent and GNOME Keyring prompter for [noctalia-shell](https://github.com/noctalia-dev/noctalia-shell).
+# noctalia-auth
 
-Requires polkit-auth [plugin](https://github.com/anthonyhab/noctalia-plugins/tree/main/polkit-auth).
+Unified authentication daemon for Noctalia Shell.
 
-## Features
-- Polkit authentication prompts
-- GNOME Keyring unlock prompts (replaces `gcr-prompter`)
+- Polkit authentication agent
+- GNOME Keyring system prompter replacement
+- GPG pinentry bridge
 
+This daemon is consumed by the `polkit-auth` plugin in `noctalia-plugins`.
+
+## Runtime Contract
+
+- Service: `noctalia-auth.service`
+- Socket: `$XDG_RUNTIME_DIR/noctalia-auth.sock`
+- Main binary: `noctalia-auth`
+- Pinentry binary: `pinentry-noctalia`
+- Fallback UI binary: `noctalia-auth-fallback`
 
 ## Install
 
-### Arch Linux (AUR)
+### AUR
 
 ```bash
-yay -S noctalia-unofficial-auth-agent
+yay -S noctalia-auth-git
 ```
 
-### Manual Build (Arch / Fedora / Debian/Ubuntu)
+### Manual build
 
-Dependencies (names vary by distro): Qt6 base, polkit-qt6, polkit, gcr-4, json-glib, cmake, pkg-config.
+Dependencies (distro names vary): Qt6 base, polkit-qt6, polkit, gcr-4, json-glib, cmake, pkg-config.
 
 ```bash
-git clone https://github.com/anthonyhab/noctalia-polkit/
+git clone https://github.com/anthonyhab/noctalia-polkit
+cd noctalia-polkit
 cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr
 cmake --build build
 sudo cmake --install build
 ```
 
-### Development Build
-
-For testing changes before committing, use the dev build script:
-
-```bash
-./build-dev.sh install    # Build and install to ~/.local
-./build-dev.sh enable     # Enable and start dev service
-./build-dev.sh status     # Check service status
-./build-dev.sh disable    # Switch back to AUR version
-./build-dev.sh uninstall  # Remove dev build
-```
-
-The dev build installs to `~/.local` and uses a separate systemd service in `~/.config/systemd/user/`, so it doesn't conflict with the AUR package installed to `/usr`.
-
-Enable the user service:
+Enable the service:
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now noctalia-auth.service
 ```
 
-Notes:
-- Test polkit authentication by running `pkexec true`
-- Test keyring unlock by locking your keyring (via Seahorse or `dbus-send`) then running `echo test | secret-tool store --label=test attr val`
-- Make sure you have the plugin installed, reload noctalia-shell if you aren't seeing requests after installing.
-- The Noctalia plugin connects over IPC at `$XDG_RUNTIME_DIR/noctalia-auth.sock`.
+On each service start, bootstrap automatically:
 
-### NixOS / Nix
+- validates and repairs `gpg-agent` pinentry path when stale
+- stops known competing polkit agents for the current session
 
-```bash
-nix build .#noctalia-polkit
-# or install into your user profile:
-nix profile install .#noctalia-polkit
+If no shell UI provider is active when an auth request arrives, daemon launches `noctalia-auth-fallback` automatically.
+The fallback app enforces a single-instance lock and stands down when a higher-priority shell provider becomes active.
+
+For tiling compositors, the fallback app uses a normal top-level window so it can still be tiled manually by the compositor.
+On Hyprland, add a class-based rule if you want default floating + centering on open:
+
+```ini
+windowrule {
+  name = Noctalia Auth Fallback
+  float = on
+  center = on
+  size = 560 360
+  match:class = noctalia-auth-fallback
+}
 ```
 
-Then enable the user service:
+## Development workflow
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now noctalia-auth.service
+./build-dev.sh install
+./build-dev.sh enable
+./build-dev.sh doctor
+```
+
+Useful commands:
+
+```bash
+./build-dev.sh status
+./build-dev.sh disable
+./build-dev.sh uninstall
+```
+
+## Conflict policy
+
+Default policy is `session` (Linux-safe best practice): competing agents are stopped for the current session only.
+
+Optional modes can be set with a service override environment variable:
+
+- `NOCTALIA_AUTH_CONFLICT_MODE=session` (default)
+- `NOCTALIA_AUTH_CONFLICT_MODE=persistent` (disable known competing user services/autostarts)
+- `NOCTALIA_AUTH_CONFLICT_MODE=warn` (detect only)
+
+In `persistent` mode, user autostart entries are backed up under `~/.local/state/noctalia-auth/autostart-backups/` before override files are written.
+
+Example:
+
+```bash
+systemctl --user edit noctalia-auth.service
+```
+
+Add:
+
+```ini
+[Service]
+Environment=NOCTALIA_AUTH_CONFLICT_MODE=session
+```
+
+## Smoke checks
+
+```bash
+pkexec true
+echo test | secret-tool store --label=test attr val
+```
+
+If prompts do not appear, run `./build-dev.sh doctor` first.
+
+For common failures, see `docs/TROUBLESHOOTING.md`.
+
+## Nix
+
+```bash
+nix build .#noctalia-auth
+nix profile install .#noctalia-auth
 ```

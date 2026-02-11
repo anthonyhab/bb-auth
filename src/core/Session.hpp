@@ -17,6 +17,7 @@ public:
         QString name;
         QString icon;
         QString fallbackLetter;
+        QString fallbackKey;
         qint64 pid{0};
     };
 
@@ -51,8 +52,9 @@ public:
     [[nodiscard]] State state() const { return m_state; }
 
     // State transitions
-    void setPrompt(const QString& prompt, bool echo = false);
+    void setPrompt(const QString& prompt, bool echo = false, bool clearError = true);
     void setError(const QString& error);
+    void setPinentryRetry(int curRetry, int maxRetries);
     void close(Result result);
 
     // Serialization (v2 protocol)

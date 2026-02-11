@@ -12,9 +12,8 @@ namespace noctalia {
     inline constexpr int         IPC_WRITE_TIMEOUT_MS   = 1000;
 
     // Pinentry timeouts
-    inline constexpr int PINENTRY_REQUEST_TIMEOUT_MS      = 5 * 60 * 1000; // 5 minutes
-    inline constexpr int PINENTRY_DEFERRED_DELAY_MS       = 300;
-    inline constexpr int PINENTRY_DEFERRED_DELAY_RETRY_MS = 3000;
+    inline constexpr int PINENTRY_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes
+    inline constexpr int PINENTRY_RESULT_TIMEOUT_MS  = 10 * 1000;       // wait for terminal result after submit
 
     // Authentication
     inline constexpr int MAX_AUTH_RETRIES = 3;

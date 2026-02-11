@@ -1,12 +1,13 @@
 [Unit]
-Description=Noctalia Polkit Authentication Agent
+Description=Noctalia Auth - Unified Authentication Agent
 PartOf=graphical-session.target
 After=graphical-session.target
 ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
-ExecStartPre=/bin/sh -c 'mkdir -p "$${XDG_DATA_HOME:-$$HOME/.local/share}/dbus-1/services" && cp -n @DATADIR@/noctalia-polkit/org.gnome.keyring.SystemPrompter.service "$${XDG_DATA_HOME:-$$HOME/.local/share}/dbus-1/services/"'
-ExecStart=@LIBEXECDIR@/noctalia-polkit
+ExecStartPre=@LIBEXECDIR@/noctalia-auth-bootstrap
+ExecStartPre=/bin/sh -c 'mkdir -p "$${XDG_DATA_HOME:-$$HOME/.local/share}/dbus-1/services" && install -m 0644 @DATADIR@/noctalia-auth/org.gnome.keyring.SystemPrompter.service "$${XDG_DATA_HOME:-$$HOME/.local/share}/dbus-1/services/org.gnome.keyring.SystemPrompter.service"'
+ExecStart=@LIBEXECDIR@/noctalia-auth --daemon
 Slice=session.slice
 TimeoutStopSec=5sec
 Restart=on-failure

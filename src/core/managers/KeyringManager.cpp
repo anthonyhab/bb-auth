@@ -44,6 +44,7 @@ namespace noctalia {
         ctx.requestor.name = actor.displayName;
         ctx.requestor.icon = actor.iconName;
         ctx.requestor.fallbackLetter = actor.fallbackLetter;
+        ctx.requestor.fallbackKey = actor.fallbackKey;
         ctx.requestor.pid = peerPid;
 
         // Use centralized session management

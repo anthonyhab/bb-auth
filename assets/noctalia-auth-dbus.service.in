@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.noctalia.polkitagent
+Exec=@LIBEXECDIR@/noctalia-auth --daemon
+SystemdService=noctalia-auth.service
