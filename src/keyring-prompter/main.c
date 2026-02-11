@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <errno.h>
 
-#include "noctalia-prompt.h"
+#include "bb-prompt.h"
 #include "ipc-client.h"
 
 #define FALLBACK_GCR_PROMPTER "/usr/lib/gcr-prompter"
@@ -149,7 +149,7 @@ bb_auth_keyring_main (int argc, char *argv[])
 
     /* Create system prompter with our custom prompt type */
     the_prompter = gcr_system_prompter_new (GCR_SYSTEM_PROMPTER_SINGLE,
-                                            NOCTALIA_TYPE_PROMPT);
+                                            BB_AUTH_TYPE_PROMPT);
 
     g_signal_connect (the_prompter, "notify::prompting",
                       G_CALLBACK (on_prompting_changed), NULL);

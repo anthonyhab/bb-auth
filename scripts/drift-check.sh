@@ -26,8 +26,8 @@ if [ -e assets/bb-auth-dbus.service.in ]; then
   exit 1
 fi
 
-if grep -q 'cp -n' assets/noctalia-auth.service.in; then
-  echo "[fail] stale cp -n behavior found in assets/noctalia-auth.service.in"
+if grep -q 'cp -n' assets/bb-auth.service.in; then
+  echo "[fail] stale cp -n behavior found in assets/bb-auth.service.in"
   exit 1
 fi
 

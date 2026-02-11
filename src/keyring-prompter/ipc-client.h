@@ -5,7 +5,7 @@
 
 G_BEGIN_DECLS
 
-/* Check if noctalia-auth socket is available */
+/* Check if bb-auth socket is available */
 gboolean bb_auth_ipc_ping (void);
 
 /* Send a keyring password request, blocks until response received

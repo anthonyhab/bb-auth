@@ -386,5 +386,5 @@ bb_auth_prompt_init (BbAuthPrompt *self)
 BbAuthPrompt *
 bb_auth_prompt_new (void)
 {
-    return g_object_new (NOCTALIA_TYPE_PROMPT, NULL);
+    return g_object_new (BB_AUTH_TYPE_PROMPT, NULL);
 }
