@@ -1,6 +1,7 @@
 #include "FallbackWindow.hpp"
 
 #include <QCloseEvent>
+#include <QCoreApplication>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QJsonObject>
@@ -373,6 +374,16 @@ FallbackWindow::FallbackWindow(FallbackClient* client, QWidget* parent)
     hide();
     ensureContentFits();
 
+    // Setup idle exit timer - exit process when hidden with no active session
+    m_idleExitTimer = new QTimer(this);
+    m_idleExitTimer->setSingleShot(true);
+    const QByteArray idleTimeoutEnv = qgetenv("BB_AUTH_FALLBACK_IDLE_MS");
+    const int idleTimeoutMs = idleTimeoutEnv.isEmpty() ? 30000 : QString::fromLatin1(idleTimeoutEnv).toInt();
+    m_idleExitTimer->setInterval(qMax(5000, idleTimeoutMs)); // Minimum 5s safety
+    connect(m_idleExitTimer, &QTimer::timeout, this, []() {
+        QCoreApplication::quit();
+    });
+
     connect(m_input, &QLineEdit::returnPressed, this, [this]() {
         if (m_submitButton->isEnabled()) {
             m_submitButton->click();
@@ -446,6 +457,7 @@ FallbackWindow::FallbackWindow(FallbackClient* client, QWidget* parent)
             clearSession();
         }
         hide();
+        startIdleExitTimer();
     });
 
     connect(m_client, &FallbackClient::statusMessage, this, [this](const QString& status) {
@@ -485,6 +497,7 @@ FallbackWindow::FallbackWindow(FallbackClient* client, QWidget* parent)
         setBusy(false);
         ensureContentFits();
 
+        stopIdleExitTimer();
         show();
         raise();
         activateWindow();
@@ -542,6 +555,7 @@ FallbackWindow::FallbackWindow(FallbackClient* client, QWidget* parent)
             QTimer::singleShot(300, this, [this]() {
                 clearSession();
                 hide();
+                startIdleExitTimer();
             });
             return;
         }
@@ -549,6 +563,7 @@ FallbackWindow::FallbackWindow(FallbackClient* client, QWidget* parent)
         if (result == "cancelled" || result == "canceled") {
             clearSession();
             hide();
+            startIdleExitTimer();
             return;
         }
 
@@ -875,6 +890,20 @@ FallbackWindow::PromptDisplayModel FallbackWindow::buildDisplayModel(const QJson
 
     model.passphrasePrompt = (source == "pinentry") || model.prompt.contains("passphrase", Qt::CaseInsensitive);
     return model;
+}
+
+void FallbackWindow::startIdleExitTimer() {
+    // Start countdown to exit when hidden with no active session
+    if (m_idleExitTimer && m_currentSessionId.isEmpty() && !isVisible()) {
+        m_idleExitTimer->start();
+    }
+}
+
+void FallbackWindow::stopIdleExitTimer() {
+    // Cancel exit countdown when showing or receiving a session
+    if (m_idleExitTimer) {
+        m_idleExitTimer->stop();
+    }
 }
 
 } // namespace noctalia

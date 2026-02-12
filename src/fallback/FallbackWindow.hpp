@@ -7,6 +7,7 @@
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QTimer;
 
 namespace noctalia {
 
@@ -74,6 +75,12 @@ class FallbackWindow : public QWidget {
     bool            m_contextExpanded = false;
     bool            m_confirmOnly = false;
     bool            m_busy = false;
+
+    // Idle exit timer - process exits when hidden with no active session
+    QTimer*         m_idleExitTimer = nullptr;
+
+    void startIdleExitTimer();
+    void stopIdleExitTimer();
 };
 
 } // namespace noctalia
