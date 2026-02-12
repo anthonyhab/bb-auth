@@ -1,20 +1,41 @@
 # bb-auth
 
-Unified authentication daemon for Noctalia Shell.
+Unified authentication daemon.
 
 - Polkit authentication agent
 - GNOME Keyring system prompter replacement
 - GPG pinentry bridge
 
-This daemon is consumed by the `bb-auth` plugin in `noctalia-plugins`.
+This daemon is consumed by the `bb-auth` shell plugin.
+
+UI providers (plugins) connect over the local socket and handle authentication prompts. The daemon launches `bb-auth-fallback` automatically when no provider is active.
 
 ## Runtime Contract
 
-- Service: `bb-auth.service`
+- Service: `bb-auth.service` (user service, Wayland-only by default)
 - Socket: `$XDG_RUNTIME_DIR/bb-auth.sock`
+- D-Bus: `org.bb.auth` (polkit agent), `org.gnome.keyring.SystemPrompter` (keyring prompter)
 - Main binary: `bb-auth`
-- Pinentry binary: `pinentry-bb`
+- Pinentry binary: `pinentry-bb` (symlink to `bb-auth`)
 - Fallback UI binary: `bb-auth-fallback`
+
+## Install Locations
+
+Binaries install to `libexecdir` (typically `/usr/libexec` or `~/.local/libexec`):
+- `/usr/libexec/bb-auth` (main daemon)
+- `/usr/libexec/bb-auth-fallback` (fallback UI)
+- `/usr/libexec/pinentry-bb` → `bb-auth` (symlink)
+- `/usr/libexec/bb-auth-bootstrap` (service setup)
+
+User-facing command (in `PATH`):
+- `/usr/bin/bb-auth-migrate` (migration script from noctalia-auth)
+
+Systemd unit:
+- `/usr/lib/systemd/user/bb-auth.service`
+
+D-Bus service files:
+- `/usr/share/dbus-1/services/org.bb.auth.service`
+- `~/.local/share/dbus-1/services/org.gnome.keyring.SystemPrompter.service` (installed at runtime)
 
 ## Install
 
@@ -29,12 +50,14 @@ yay -S bb-auth-git
 Dependencies (distro names vary): Qt6 base, polkit-qt6, polkit, gcr-4, json-glib, cmake, pkg-config.
 
 ```bash
-git clone https://github.com/anthonyhab/noctalia-polkit
-cd noctalia-polkit
+git clone https://github.com/anthonyhab/bb-auth
+cd bb-auth
 cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr
 cmake --build build
 sudo cmake --install build
 ```
+
+The systemd unit requires `WAYLAND_DISPLAY` (Wayland-only). To run on X11, remove or override the `ConditionEnvironment=WAYLAND_DISPLAY` line in the service file.
 
 Enable the service:
 
@@ -56,7 +79,6 @@ On Hyprland, add a class-based rule if you want default floating + centering on 
 
 ```ini
 windowrule {
-  name = Noctalia Auth Fallback
   float = on
   center = on
   size = 560 360
@@ -147,7 +169,7 @@ This will:
 Then enable the new service:
 
 ```bash
-systemctl --user enable --now bb-auth
+systemctl --user enable --now bb-auth.service
 ```
 
-The plugin ID has changed from `polkit-auth` to `bb-auth`. Reinstall through the Noctalia plugin UI.
+The plugin ID has changed from `polkit-auth` to `bb-auth`. Reinstall through your shell's plugin UI.

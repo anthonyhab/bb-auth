@@ -39,7 +39,7 @@ namespace {
         return Mode::Cli; // Default to CLI mode (which includes daemon)
     }
 
-    int runCli(QCoreApplication& app, const QString& socketPathOverride) {
+    int runCli(QCoreApplication& app, int argc, char* argv[], const QString& socketPathOverride) {
         QCommandLineParser parser;
         parser.setApplicationDescription("BB Auth - Unified authentication agent");
         parser.addHelpOption();
@@ -68,7 +68,7 @@ namespace {
 
         parser.process(app);
 
-        const QString socketPath = parser.isSet(optSocket) ? parser.value(optSocket) : (!socketPathOverride.isEmpty() ? socketPathOverride : noctalia::socketPath());
+        const QString socketPath = parser.isSet(optSocket) ? parser.value(optSocket) : (!socketPathOverride.isEmpty() ? socketPathOverride : bb::socketPath());
 
         // Check for explicit mode switches
         if (parser.isSet(optDaemon)) {
@@ -76,9 +76,7 @@ namespace {
         }
 
         if (parser.isSet(optKeyring)) {
-            // Keyring mode is handled separately with GLib
-            std::print(stderr, "Keyring mode not yet implemented via --keyring flag\n");
-            return 1;
+            return modes::runKeyring(argc, argv);
         }
 
         if (parser.isSet(optPinentry)) {
@@ -87,13 +85,13 @@ namespace {
 
         // CLI commands for interacting with daemon
         if (parser.isSet(optPing)) {
-            noctalia::IpcClient client(socketPath);
+            bb::IpcClient client(socketPath);
             return client.ping() ? 0 : 1;
         }
 
         if (parser.isSet(optNext)) {
-            noctalia::IpcClient client(socketPath);
-            auto                response = client.sendRequest(QJsonObject{{"type", "next"}}, 1000);
+            bb::IpcClient client(socketPath);
+            auto          response = client.sendRequest(QJsonObject{{"type", "next"}}, 1000);
             if (response) {
                 const auto out = QJsonDocument(*response).toJson(QJsonDocument::Compact);
                 fprintf(stdout, "%s\n", out.constData());
@@ -102,20 +100,20 @@ namespace {
         }
 
         if (parser.isSet(optRespond)) {
-            const QString       cookie = parser.value(optRespond);
-            QTextStream         stdinStream(stdin);
-            const QString       password = stdinStream.readLine();
+            const QString cookie = parser.value(optRespond);
+            QTextStream   stdinStream(stdin);
+            const QString password = stdinStream.readLine();
 
-            noctalia::IpcClient client(socketPath);
-            auto                response = client.sendRequest(QJsonObject{{"type", "session.respond"}, {"id", cookie}, {"response", password}}, 1000);
+            bb::IpcClient client(socketPath);
+            auto          response = client.sendRequest(QJsonObject{{"type", "session.respond"}, {"id", cookie}, {"response", password}}, 1000);
             return (response && response->value("type").toString() == "ok") ? 0 : 1;
         }
 
         if (parser.isSet(optCancel)) {
-            const QString       cookie = parser.value(optCancel);
+            const QString cookie = parser.value(optCancel);
 
-            noctalia::IpcClient client(socketPath);
-            auto                response = client.sendRequest(QJsonObject{{"type", "session.cancel"}, {"id", cookie}}, 1000);
+            bb::IpcClient client(socketPath);
+            auto          response = client.sendRequest(QJsonObject{{"type", "session.cancel"}, {"id", cookie}}, 1000);
             return (response && response->value("type").toString() == "ok") ? 0 : 1;
         }
 
@@ -147,7 +145,11 @@ int main(int argc, char* argv[]) {
 
     QCoreApplication app(argc, argv);
     app.setApplicationName("bb-auth");
-    app.setApplicationVersion("1.0.0");
+#ifdef BB_AUTH_VERSION
+    app.setApplicationVersion(BB_AUTH_VERSION);
+#else
+    app.setApplicationVersion("0.1.3");
+#endif
 
-    return runCli(app, {});
+    return runCli(app, argc, argv, {});
 }

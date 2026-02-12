@@ -94,6 +94,7 @@ target_link_libraries(bb-auth
         PkgConfig::polkit_deps
         PkgConfig::gcr_deps
 )
+target_compile_definitions(bb-auth PRIVATE BB_AUTH_VERSION="${VER}")
 
 include(GNUInstallDirs)
 
