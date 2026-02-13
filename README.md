@@ -1,103 +1,219 @@
 # bb-auth
 
-`bb-auth` is a Linux desktop authentication daemon for polkit, GNOME Keyring system prompts, and GPG pinentry.
+Linux desktop authentication that stays out of your way.
 
-It expects a `bb-auth` shell provider. If no provider is active, it auto-launches `bb-auth-fallback` so prompts still appear.
+![Fallback prompt](assets/screenshot.png)
 
-## Quick start
+**bb-auth** handles polkit elevation, GNOME Keyring unlocks, and GPG pinentry with a unified prompt system. It works with your shell (Waybar, ags, etc.) or shows a standalone fallback window when needed.
 
-### 1) Install
+---
 
-**AUR**
+## What it does
+
+| Without bb-auth | With bb-auth |
+|-----------------|--------------|
+| polkit-gnome popup windows | Prompts in your shell bar |
+| `secret-tool` hangs silently | Prompts appear, then auto-unlock |
+| GPG prompts in terminal | GUI prompts with touch sensor support |
+| Multiple inconsistent UIs | One system, your styling |
+
+**The key idea:** Your shell provides the UI. If it can't, a lightweight fallback window appears automatically. Nothing blocks, nothing hangs.
+
+---
+
+## Requirements
+
+- Linux with **Wayland** (X11 works with config override)
+- `polkit` daemon running
+- One of: AUR helper, Nix, or manual build tools
+
+---
+
+## Install
+
+Pick one:
+
+**Arch Linux (AUR)** — recommended for most users
 ```bash
 yay -S bb-auth-git
 ```
 
 **Nix**
 ```bash
-nix build .#bb-auth
-nix profile install .#bb-auth
+nix profile install github:anthonyhab/bb-auth#bb-auth
 ```
 
-**Dev/local build**
+**Manual build**
 ```bash
+git clone https://github.com/anthonyhab/bb-auth
+cd bb-auth
 ./build-dev.sh install
 ```
 
-### 2) Enable user service
+---
 
+## First run
+
+1. **Enable the service**
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now bb-auth.service
+   ```
+
+2. **Verify it's running**
+   ```bash
+   systemctl --user status bb-auth.service
+   # Should show "active (running)"
+   ```
+
+3. **Test a prompt**
+   ```bash
+   pkexec echo "it works"
+   ```
+
+   You should see a fallback window (we haven't set up shell integration yet).
+
+---
+
+## Add to your shell (optional but recommended)
+
+The fallback works fine. A shell provider looks better.
+
+**What's a shell provider?** A small widget that connects to bb-auth and draws prompts in your bar/panel.
+
+| Shell | Provider | Install |
+|-------|----------|---------|
+| ags (Aylur's GTK Shell) | bb-ags (coming soon) | `yay -S bb-ags` |
+| Waybar | bb-waybar (coming soon) | `yay -S bb-waybar` |
+| Custom | Protocol docs below | See `docs/PROTOCOL.md` |
+
+Once a provider connects, fallback auto-exits. If the provider crashes, fallback auto-starts. You don't manage this.
+
+---
+
+## Daily use
+
+**Elevation:** `pkexec command` — prompt appears in shell, or fallback window  
+**Keyring:** `secret-tool store --label="Email" service gmail` — unlocks once, stays unlocked  
+**GPG:** `git commit -S` — pinentry with fingerprint reader support
+
+**First boot note:** On a fresh login, the first keyring unlock may prompt twice (once for login keyring, once for the app). This is normal GNOME Keyring behavior, not bb-auth.
+
+---
+
+## Common issues
+
+**"pkexec hangs with no prompt"**
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now bb-auth.service
+# Check service is running
+systemctl --user status bb-auth.service
+
+# Check logs
+journalctl --user -u bb-auth.service -n 50
+
+# Likely cause: another polkit agent is running
+killall polkit-gnome-authentication-agent-1
+systemctl --user restart bb-auth.service
 ```
 
-### 3) Smoke test
-
+**"GPG prompts still go to terminal"**
 ```bash
-pkexec true
-echo test | secret-tool store --label=test attr val
-./build-dev.sh doctor
+# Check pinentry path
+ls -l /usr/libexec/pinentry-bb
+
+# If missing or wrong, run bootstrap
+bb-auth-bootstrap
+
+# Or manually edit ~/.gnupg/gpg-agent.conf:
+pinentry-program /usr/libexec/pinentry-bb
+gpg-connect-agent reloadagent /bye
 ```
 
-If prompts do not show, start with [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+**"Service fails on X11"**
+The default service has a Wayland gate. Edit the override:
+```bash
+systemctl --user edit bb-auth.service
+```
+Remove or comment out:
+```ini
+# ConditionEnvironment=WAYLAND_DISPLAY
+```
 
-## Runtime behavior
+**"Prompts look wrong / touch sensor not working"**
+The fallback UI includes touch sensor support (fingerprint, FIDO2). If detection fails:
+```bash
+# Force password mode
+BB_AUTH_FALLBACK_FORCE_PASSWORD=1 pkexec command
+```
 
-- Requests route through `bb-auth`.
-- If no shell provider is active, `bb-auth-fallback` is launched automatically.
-- Fallback is single-instance and exits when a higher-priority provider appears.
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for deeper debugging.
 
-Runtime contract:
-- Service: `bb-auth.service`
-- Socket: `$XDG_RUNTIME_DIR/bb-auth.sock`
-- D-Bus names: `org.bb.auth`, `org.gnome.keyring.SystemPrompter`
+---
 
-## Wayland / X11
+## How it works
 
-The shipped user service is Wayland-gated with `ConditionEnvironment=WAYLAND_DISPLAY` (see `assets/bb-auth.service.in:5`). On X11, remove or override that condition in a user unit override.
+```
+┌─────────────────┐     ┌──────────────┐     ┌──────────────────┐
+│   Application   │────▶│   bb-auth    │────▶│  Shell provider  │
+│  (pkexec/gpg)   │     │   daemon     │     │  (Waybar/ags)    │
+└─────────────────┘     └──────────────┘     └──────────────────┘
+                               │
+                               └────▶ Fallback window (if no shell)
+```
 
-## Conflict policy (`BB_AUTH_CONFLICT_MODE`)
+**Priority system:** Multiple providers can connect. Highest priority wins. Tie breaks by most recent heartbeat. Dead providers auto-prune.
 
-| Mode | Behavior |
-|---|---|
-| `session` (default) | Stop known competing agents/services for the current session only. |
-| `persistent` | Also disable competing user services and write autostart overrides (backups in `~/.local/state/bb-auth/autostart-backups/`). |
-| `warn` | Detect conflicts only; no stopping/disable actions. |
+**Conflict handling:** If another polkit agent runs, bb-auth can stop it (default: session-only), warn only, or do nothing. Configurable via `BB_AUTH_CONFLICT_MODE`.
 
-Set the mode with a user override:
+---
 
+## Configuration
+
+**Environment variables** (set in service override):
+
+| Variable | Values | Default |
+|----------|--------|---------|
+| `BB_AUTH_CONFLICT_MODE` | `session`, `persistent`, `warn` | `session` |
+| `BB_AUTH_FALLBACK_PATH` | Path to binary | auto-detected |
+
+**Service override:**
 ```bash
 systemctl --user edit bb-auth.service
 ```
 
 ```ini
 [Service]
-Environment=BB_AUTH_CONFLICT_MODE=session
+Environment=BB_AUTH_CONFLICT_MODE=warn
 ```
 
-## Troubleshooting + FAQ
+---
 
-- Troubleshooting guide: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-
-**No prompts appear**  
-Run `./build-dev.sh doctor`, then follow the troubleshooting guide.
-
-**Why doesn't it start on X11?**  
-The default service has a Wayland gate (`assets/bb-auth.service.in:5`).
-
-**What if another polkit agent is already running?**  
-Behavior is controlled by `BB_AUTH_CONFLICT_MODE`.
-
-## Migration from `noctalia-auth`
+## Migration from noctalia-auth
 
 ```bash
 bb-auth-migrate
-# Optional cleanup:
+
+# Optional: remove old binaries
 bb-auth-migrate --remove-binaries
-# Skip auto-enable/start:
-bb-auth-migrate --no-enable
 ```
 
-## Screenshot
+---
 
-![Fallback prompt window (bb-auth-fallback)](assets/screenshot.png)
+## Development
+
+```bash
+# Build and run tests
+./build-dev.sh test
+
+# Run with verbose logging
+./build-dev.sh run --verbose
+
+# Check wiring
+./build-dev.sh doctor
+```
+
+---
+
+## License
+
+MIT
