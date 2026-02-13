@@ -35,5 +35,7 @@
 .cache/
 build/
 build-dev/
+build-analysis/
+build-check/
 
 compile_commands.json

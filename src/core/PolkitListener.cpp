@@ -145,6 +145,7 @@ void CPolkitListener::onSessionInfo(const QString& text) {
         return;
 
     std::print("> PKS showInfo (cookie: {}): {}\n", state->cookie.toStdString(), text.toStdString());
+    g_pAgent->onSessionInfo(state->cookie, text);
 }
 
 void CPolkitListener::finishAuth(SessionState* state) {

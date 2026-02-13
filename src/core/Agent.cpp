@@ -143,7 +143,7 @@ void CAgent::onClientDisconnected(QLocalSocket* socket) {
 
 void CAgent::handleMessage(QLocalSocket* socket, const QString& type, const QJsonObject& msg) {
     if (type == "ping") {
-        QJsonObject       pong{{"type", "pong"}, {"version", "2.0"}, {"capabilities", QJsonArray{"polkit", "keyring", "pinentry"}}};
+        QJsonObject       pong{{"type", "pong"}, {"version", "2.0"}, {"capabilities", QJsonArray{"polkit", "keyring", "pinentry", "fingerprint", "fido2"}}};
 
         const QJsonObject bootstrap = readBootstrapState();
         if (!bootstrap.isEmpty()) {
@@ -499,6 +499,15 @@ void CAgent::onSessionRetry(const QString& cookie, const QString& error) {
         return;
 
     it->second->setError(error);
+    emitSessionEvent(it->second->toUpdatedEvent());
+}
+
+void CAgent::onSessionInfo(const QString& cookie, const QString& info) {
+    auto it = m_sessions.find(cookie);
+    if (it == m_sessions.end())
+        return;
+
+    it->second->setInfo(info);
     emitSessionEvent(it->second->toUpdatedEvent());
 }
 

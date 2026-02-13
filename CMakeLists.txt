@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network DBus Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network DBus Widgets Test)
 find_package(PkgConfig REQUIRED)
 
 if(NOT MSVC)
@@ -40,6 +40,7 @@ pkg_check_modules(
   json-glib-1.0)
 
 qt_standard_project_setup(REQUIRES 6.5)
+enable_testing()
 
 # Unified bb-auth binary
 qt_add_executable(bb-auth
@@ -128,6 +129,26 @@ target_link_libraries(bb-auth-fallback
 
 install(TARGETS bb-auth-fallback
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
+qt_add_executable(bb-auth-tests
+    tests/test_session_info.cpp
+    tests/test_fallback_touch_model.cpp
+    src/core/Session.cpp
+    src/core/Session.hpp
+    src/fallback/FallbackWindow.cpp
+    src/fallback/FallbackWindow.hpp
+    src/fallback/FallbackClient.cpp
+    src/fallback/FallbackClient.hpp
+)
+
+target_link_libraries(bb-auth-tests
+    PRIVATE
+        Qt6::Test
+        Qt6::Core
+        Qt6::Widgets
+        Qt6::Network
+)
+
+add_test(NAME bb-auth-tests COMMAND bb-auth-tests)
 
 install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-bootstrap
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})

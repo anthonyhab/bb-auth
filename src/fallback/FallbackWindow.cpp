@@ -1,11 +1,13 @@
 #include "FallbackWindow.hpp"
 
 #include <QCloseEvent>
+#include <QAction>
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QLabel>
+#include <QKeySequence>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -88,6 +90,16 @@ namespace {
         return text.left(maxChars - 3).trimmed() + "...";
     }
 
+    bool isLowSignalCommand(const QString& commandName) {
+        const QString normalized = commandName.trimmed().toLower();
+        if (normalized.isEmpty()) {
+            return true;
+        }
+
+        static const QStringList lowSignal = {QStringLiteral("true"), QStringLiteral("sh"), QStringLiteral("bash")};
+        return lowSignal.contains(normalized);
+    }
+
     bool isIdentityLine(const QString& line) {
         return line.contains('"') && line.contains('<') && line.contains('>');
     }
@@ -95,6 +107,28 @@ namespace {
     bool isKeyMetadataLine(const QString& line) {
         const QString lower = line.toLower();
         return (lower.contains(" id ") || lower.startsWith("id ")) && lower.contains("created");
+    }
+
+    bool containsAnyTerm(const QString& text, std::initializer_list<const char*> terms) {
+        const QString lower = text.toLower();
+        for (const char* term : terms) {
+            if (lower.contains(QString::fromLatin1(term))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool looksLikeFingerprintPrompt(const QString& text) {
+        return containsAnyTerm(text, {"fingerprint", "finger print", "fprint", "swipe", "scan your finger"});
+    }
+
+    bool looksLikeFidoPrompt(const QString& text) {
+        return containsAnyTerm(text, {"fido", "fido2", "webauthn", "security key", "yubikey", "hardware token", "user presence"});
+    }
+
+    bool looksLikeTouchPrompt(const QString& text) {
+        return containsAnyTerm(text, {"touch", "tap", "insert", "use your security key", "verify your identity"});
     }
 
     QString extractCommandName(const QString& message) {
@@ -323,6 +357,14 @@ namespace bb {
         m_input->setMinimumHeight(38);
         m_input->setTextMargins(12, 0, 12, 0);
         m_input->setPlaceholderText("Enter password");
+        auto* togglePasswordAction = m_input->addAction("Show", QLineEdit::TrailingPosition);
+        togglePasswordAction->setCheckable(true);
+        togglePasswordAction->setToolTip("Show password");
+        connect(togglePasswordAction, &QAction::toggled, this, [this, togglePasswordAction](bool checked) {
+            m_input->setEchoMode(checked ? QLineEdit::Normal : QLineEdit::Password);
+            togglePasswordAction->setText(checked ? "Hide" : "Show");
+            togglePasswordAction->setToolTip(checked ? "Hide password" : "Show password");
+        });
         m_errorLabel = new QLabel(m_contentWidget);
         m_errorLabel->setWordWrap(true);
         m_errorLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -336,6 +378,7 @@ namespace bb {
         auto* buttonRow = new QHBoxLayout();
         buttonRow->setSpacing(8);
         m_cancelButton = new QPushButton("Cancel", m_contentWidget);
+        m_cancelButton->setShortcut(QKeySequence::Cancel);
         m_submitButton = new QPushButton("Authenticate", m_contentWidget);
         m_cancelButton->setMinimumHeight(34);
         m_submitButton->setMinimumHeight(34);
@@ -380,7 +423,7 @@ namespace bb {
                 return;
             }
 
-            if (!m_confirmOnly && m_input->text().isEmpty()) {
+            if (!m_confirmOnly && !m_allowEmptyResponse && m_input->text().isEmpty()) {
                 const bool passphrasePrompt = m_promptLabel->text().contains("passphrase", Qt::CaseInsensitive);
                 setErrorText(passphrasePrompt ? "Please enter your passphrase." : "Please enter your password.");
                 return;
@@ -447,7 +490,7 @@ namespace bb {
 
         connect(m_client, &FallbackClient::statusMessage, this, [this](const QString& status) { setStatusText(status); });
 
-        connect(m_client, &FallbackClient::sessionCreated, this, [this](const QJsonObject& event) {
+        connect(m_client, &FallbackClient::sessionCreated, this, [this, togglePasswordAction](const QJsonObject& event) {
             const QString id = event.value("id").toString();
             if (id.isEmpty()) {
                 return;
@@ -455,6 +498,7 @@ namespace bb {
 
             m_currentSessionId             = id;
             m_confirmOnly                  = event.value("context").toObject().value("confirmOnly").toBool();
+            m_allowEmptyResponse           = false;
             const PromptDisplayModel model = buildDisplayModel(event);
             configureSizingForIntent(model.intent);
 
@@ -468,12 +512,19 @@ namespace bb {
 
             m_input->clear();
             m_input->setEchoMode(QLineEdit::Password);
+            togglePasswordAction->setChecked(false);
+            togglePasswordAction->setText("Show");
+            togglePasswordAction->setToolTip("Show password");
+            togglePasswordAction->setVisible(!m_confirmOnly);
+            togglePasswordAction->setEnabled(!m_confirmOnly);
             m_input->setVisible(!m_confirmOnly);
             m_promptLabel->setVisible(!m_confirmOnly);
             const bool    passphrasePrompt = model.passphrasePrompt;
-            const QString placeholder      = passphrasePrompt ? QString("Enter passphrase") : QString("Enter password");
+            const QString placeholder =
+                model.allowEmptyResponse ? QString("Press Enter to continue (optional)") : (passphrasePrompt ? QString("Enter passphrase") : QString("Enter password"));
             m_input->setPlaceholderText(m_confirmOnly ? QString() : placeholder);
-            m_submitButton->setText(m_confirmOnly ? "Confirm" : "Authenticate");
+            m_submitButton->setText(m_confirmOnly ? "Confirm" : (model.allowEmptyResponse ? "Continue" : "Authenticate"));
+            m_allowEmptyResponse = model.allowEmptyResponse;
 
             setErrorText("");
             setStatusText("");
@@ -492,7 +543,7 @@ namespace bb {
             }
         });
 
-        connect(m_client, &FallbackClient::sessionUpdated, this, [this](const QJsonObject& event) {
+        connect(m_client, &FallbackClient::sessionUpdated, this, [this, togglePasswordAction](const QJsonObject& event) {
             const QString id = event.value("id").toString();
             if (id.isEmpty() || id != m_currentSessionId) {
                 return;
@@ -503,9 +554,38 @@ namespace bb {
                 m_promptLabel->setText(prompt);
             }
 
+            const QString info              = event.value("info").toString().trimmed();
+            const QString hint              = prompt + "\n" + info;
+            const bool    fingerprintPrompt = looksLikeFingerprintPrompt(hint);
+            const bool    fidoPrompt        = looksLikeFidoPrompt(hint);
+            const bool    touchPrompt       = fingerprintPrompt || fidoPrompt || looksLikeTouchPrompt(hint);
+
+            if (fingerprintPrompt) {
+                m_titleLabel->setText("Verify Fingerprint");
+            } else if (fidoPrompt) {
+                m_titleLabel->setText("Use Security Key");
+            }
+
+            if (!m_confirmOnly) {
+                m_allowEmptyResponse = touchPrompt;
+                if (touchPrompt) {
+                    m_promptLabel->setText("Press Enter to continue (or wait)");
+                    m_input->setPlaceholderText("Press Enter to continue (optional)");
+                    m_submitButton->setText("Continue");
+                } else {
+                    const bool passphrasePrompt = m_promptLabel->text().contains("passphrase", Qt::CaseInsensitive);
+                    m_input->setPlaceholderText(passphrasePrompt ? QString("Enter passphrase") : QString("Enter password"));
+                    m_submitButton->setText("Authenticate");
+                }
+            }
+
+            if (!info.isEmpty()) {
+                setStatusText(info);
+            }
+
             if (event.contains("echo")) {
                 const bool echo = event.value("echo").toBool();
-                m_input->setEchoMode(echo ? QLineEdit::Normal : QLineEdit::Password);
+                togglePasswordAction->setChecked(echo);
             }
 
             const QString error = event.value("error").toString();
@@ -515,7 +595,10 @@ namespace bb {
                 setErrorText("");
             }
 
-            setStatusText("");
+            if (info.isEmpty()) {
+                setStatusText("");
+            }
+
             setBusy(false);
 
             if (!m_confirmOnly) {
@@ -579,8 +662,9 @@ namespace bb {
 
     void FallbackWindow::clearSession() {
         m_currentSessionId.clear();
-        m_confirmOnly  = false;
-        m_activeIntent = PromptIntent::Generic;
+        m_confirmOnly        = false;
+        m_activeIntent       = PromptIntent::Generic;
+        m_allowEmptyResponse = false;
         configureSizingForIntent(m_activeIntent);
         m_titleLabel->setText("Authentication Required");
         m_summaryLabel->clear();
@@ -713,7 +797,7 @@ namespace bb {
             m_baseHeight = 360;
             m_minWidth   = 500;
             m_minHeight  = 336;
-        } else if (intent == PromptIntent::Unlock || intent == PromptIntent::RunCommand) {
+        } else if (intent == PromptIntent::Unlock || intent == PromptIntent::RunCommand || intent == PromptIntent::Fingerprint || intent == PromptIntent::Fido2) {
             m_baseWidth  = 540;
             m_baseHeight = 280;
             m_minWidth   = 500;
@@ -730,38 +814,57 @@ namespace bb {
 
     FallbackWindow::PromptDisplayModel FallbackWindow::buildDisplayModel(const QJsonObject& event) const {
         PromptDisplayModel model;
-
-        const QString      source    = event.value("source").toString();
-        const QJsonObject  context   = event.value("context").toObject();
-        const QJsonObject  requestor = context.value("requestor").toObject();
-
-        const QString      message       = context.value("message").toString();
-        const QString      description   = context.value("description").toString();
-        const QString      requestorName = requestor.value("name").toString().trimmed();
-
-        const QString      detailText   = (description + " " + message).toLower();
-        const QString      commandName  = (source == "polkit") ? extractCommandName(message) : QString();
-        QString            unlockTarget = (source == "polkit" || source == "keyring") ? extractUnlockTargetFromContext(context) : QString();
-
+        const QString      source                = event.value("source").toString();
+        const QJsonObject  context               = event.value("context").toObject();
+        const QJsonObject  requestor             = context.value("requestor").toObject();
+        const QString      message               = context.value("message").toString();
+        const QString      description           = context.value("description").toString();
+        const QString      requestorName         = requestor.value("name").toString().trimmed();
+        const QString      infoText              = normalizeDetailText(event.value("info").toString());
+        const QString      normalizedMessage     = normalizeDetailText(message);
+        const QString      normalizedDescription = normalizeDetailText(description);
+        const QString      detailText            = (normalizedDescription + " " + normalizedMessage).toLower();
+        const QString      authHintText          = (detailText + " " + infoText).toLower();
+        const QString      commandName           = (source == "polkit") ? extractCommandName(message) : QString();
+        QString            unlockTarget          = (source == "polkit" || source == "keyring") ? extractUnlockTargetFromContext(context) : QString();
+        const bool         fingerprintHint       = looksLikeFingerprintPrompt(authHintText);
+        const bool         fidoHint              = looksLikeFidoPrompt(authHintText);
+        const bool         touchHint             = fingerprintHint || fidoHint || looksLikeTouchPrompt(authHintText);
         if (source == "keyring" && unlockTarget.isEmpty()) {
             unlockTarget = requestorName;
         }
-
-        if (source == "pinentry" && (detailText.contains("openpgp") || detailText.contains("gpg"))) {
+        if (source == "polkit" && fingerprintHint) {
+            model.intent = PromptIntent::Fingerprint;
+        } else if (source == "polkit" && fidoHint) {
+            model.intent = PromptIntent::Fido2;
+        } else if (source == "pinentry" && (detailText.contains("openpgp") || detailText.contains("gpg"))) {
             model.intent = PromptIntent::OpenPgp;
         } else if (source == "polkit" && !commandName.isEmpty()) {
             model.intent = PromptIntent::RunCommand;
         } else if ((source == "polkit" || source == "keyring") && !unlockTarget.isEmpty()) {
             model.intent = PromptIntent::Unlock;
         }
-
         if (model.intent == PromptIntent::Unlock) {
             model.title   = QString("Unlock %1").arg(unlockTarget);
             model.summary = QString("Use your password to unlock %1").arg(unlockTarget);
             model.details = buildUnlockDetails(context, unlockTarget);
+        } else if (model.intent == PromptIntent::Fingerprint) {
+            model.title   = QString("Verify Fingerprint");
+            model.summary = infoText.isEmpty() ? QString("Use your fingerprint sensor to continue") : firstMeaningfulLine(infoText);
+            model.details = normalizeDetailText(description);
+        } else if (model.intent == PromptIntent::Fido2) {
+            model.title   = QString("Use Security Key");
+            model.summary = infoText.isEmpty() ? QString("Touch your security key to continue") : firstMeaningfulLine(infoText);
+            model.details = normalizeDetailText(description);
         } else if (model.intent == PromptIntent::RunCommand) {
             model.title   = QString("Authorization Required");
-            model.summary = QString("Run %1 as superuser").arg(commandName);
+            model.summary = firstMeaningfulLine(normalizedDescription);
+            if (model.summary.isEmpty()) {
+                model.summary = firstMeaningfulLine(normalizedMessage);
+            }
+            if (model.summary.isEmpty()) {
+                model.summary = isLowSignalCommand(commandName) ? QString("Administrative privileges required") : QString("Run %1 as superuser").arg(commandName);
+            }
             model.details.clear();
         } else if (source == "pinentry") {
             if (model.intent == PromptIntent::OpenPgp) {
@@ -771,13 +874,11 @@ namespace bb {
             } else {
                 model.title = QString("Authentication Required");
             }
-
             const QString referenceText = description.isEmpty() ? message : description;
             const QString identity      = cleanIdentity(captureFirst(referenceText, QRegularExpression(QStringLiteral("\"([^\"]+)\""))));
             const QString keyId         = captureFirst(referenceText, QRegularExpression(R"(ID\s+([A-F0-9]{8,}))", QRegularExpression::CaseInsensitiveOption));
             const QString keyType       = captureFirst(referenceText, QRegularExpression(R"((\d{3,5}-bit\s+[A-Za-z0-9-]+\s+key))", QRegularExpression::CaseInsensitiveOption));
             const QString created       = captureFirst(referenceText, QRegularExpression(R"(created\s+([0-9]{4}-[0-9]{2}-[0-9]{2}))", QRegularExpression::CaseInsensitiveOption));
-
             QStringList   pieces;
             if (!identity.isEmpty()) {
                 pieces << trimToLength(identity, 72);
@@ -790,13 +891,11 @@ namespace bb {
             if (!created.isEmpty()) {
                 pieces << ("created " + created);
             }
-
             if (!pieces.isEmpty()) {
                 model.summary = pieces.join("  •  ");
             } else {
                 model.summary = firstMeaningfulLine(referenceText);
             }
-
             const QString pinText = normalizeDetailText(description.isEmpty() ? message : description);
             if (!pinText.isEmpty()) {
                 QStringList       filtered;
@@ -808,33 +907,26 @@ namespace bb {
                     }
                     filtered << line;
                 }
-
                 model.details = filtered.isEmpty() ? pinText : filtered.join("\n");
             }
         } else {
-            model.title                         = (source == "polkit") ? QString("Authorization Required") : QString("Authentication Required");
-            const QString normalizedMessage     = normalizeDetailText(message);
-            const QString normalizedDescription = normalizeDetailText(description);
-
+            model.title   = (source == "polkit") ? QString("Authorization Required") : QString("Authentication Required");
             model.summary = firstMeaningfulLine(normalizedMessage);
             if (model.summary.isEmpty()) {
                 model.summary = firstMeaningfulLine(normalizedDescription);
             }
-
             if (!normalizedDescription.isEmpty() && !textEquivalent(normalizedDescription, model.summary)) {
                 model.details = normalizedDescription;
             } else if (!normalizedMessage.isEmpty() && !textEquivalent(normalizedMessage, model.summary)) {
                 model.details = normalizedMessage;
             }
         }
-
         if (!requestorName.isEmpty()) {
             const bool duplicateUnlockRequestor = (model.intent == PromptIntent::Unlock) && (requestorName.compare(unlockTarget, Qt::CaseInsensitive) == 0);
             if (!duplicateUnlockRequestor) {
                 model.requestor = QString("Requested by %1").arg(requestorName);
             }
         }
-
         if (model.summary.isEmpty() && !model.details.isEmpty()) {
             const QString normalizedDetails = normalizeDetailText(model.details);
             const int     newline           = normalizedDetails.indexOf('\n');
@@ -846,7 +938,6 @@ namespace bb {
                 model.details = normalizedDetails.mid(newline + 1).trimmed();
             }
         }
-
         if (!model.summary.isEmpty() && !model.details.isEmpty()) {
             const QString normalizedDetails = normalizeDetailText(model.details);
             QStringList   detailLines       = normalizedDetails.split('\n');
@@ -854,20 +945,27 @@ namespace bb {
                 detailLines.removeFirst();
                 model.details = detailLines.join("\n").trimmed();
             }
-
             if (textEquivalent(model.summary, model.details)) {
                 model.details.clear();
             }
         }
-
+        if (!infoText.isEmpty() && !textEquivalent(infoText, model.summary) && !textEquivalent(infoText, model.details)) {
+            model.details = model.details.isEmpty() ? infoText : uniqueJoined(QStringList{model.details, infoText});
+        }
         if (source == "pinentry") {
             const QString pinPrompt = context.value("message").toString().trimmed();
             model.prompt            = pinPrompt.isEmpty() ? QString("Passphrase:") : pinPrompt;
         } else {
             model.prompt = QString("Password:");
+            if (source == "polkit" && touchHint) {
+                model.prompt             = QString("Press Enter to continue (or wait)");
+                model.allowEmptyResponse = true;
+            }
         }
-
         model.passphrasePrompt = (source == "pinentry") || model.prompt.contains("passphrase", Qt::CaseInsensitive);
+        if (source == "polkit" && touchHint) {
+            model.passphrasePrompt = false;
+        }
         return model;
     }
 

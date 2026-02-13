@@ -63,6 +63,7 @@ namespace bb {
         void onSessionRequest(const QString& cookie, const QString& prompt, bool echo);
         void onSessionComplete(const QString& cookie, bool success);
         void onSessionRetry(const QString& cookie, const QString& error);
+        void onSessionInfo(const QString& cookie, const QString& info);
 
         void emitSessionEvent(const QJsonObject& event);
 
