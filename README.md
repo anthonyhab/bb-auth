@@ -12,12 +12,12 @@ Linux desktop authentication that stays out of your way.
 
 | Without bb-auth | With bb-auth |
 |-----------------|--------------|
-| polkit-gnome popup windows | Prompts in your shell bar |
+| polkit-gnome popup windows | Prompts in your shell or fallback window |
 | `secret-tool` hangs silently | Prompts appear, then auto-unlock |
 | GPG prompts in terminal | GUI prompts with touch sensor support |
 | Multiple inconsistent UIs | One system, your styling |
 
-**The key idea:** Your shell provides the UI. If it can't, a lightweight fallback window appears automatically. Nothing blocks, nothing hangs.
+**The key idea:** A lightweight fallback window appears automatically when needed. When a shell provider is connected, prompts appear there instead. Nothing blocks, nothing hangs.
 
 ---
 
@@ -71,21 +71,24 @@ cd bb-auth
    pkexec echo "it works"
    ```
 
-   You should see a fallback window (we haven't set up shell integration yet).
+   You should see a fallback window (or prompt in your shell if the provider is connected).
 
 ---
 
-## Add to your shell (optional but recommended)
+## Shell integration (optional but recommended)
 
 The fallback works fine. A shell provider looks better.
 
 **What's a shell provider?** A small widget that connects to bb-auth and draws prompts in your bar/panel.
 
-| Shell | Provider | Install |
-|-------|----------|---------|
-| ags (Aylur's GTK Shell) | bb-ags (coming soon) | `yay -S bb-ags` |
-| Waybar | bb-waybar (coming soon) | `yay -S bb-waybar` |
-| Custom | Protocol docs below | See `docs/PROTOCOL.md` |
+| Shell | Provider | Status | Install |
+|-------|----------|--------|---------|
+| Noctalia Shell | [bb-auth plugin](https://github.com/anthonyhab/bibe-plugins/bb-auth/) | Available | See plugin repo |
+| ags (Aylur's GTK Shell) | bb-ags | Planned | `yay -S bb-ags` |
+| Waybar | bb-waybar | Planned | `yay -S bb-waybar` |
+| Custom | Protocol docs | See `docs/PROVIDER_CONTRACT.md` | Manual |
+
+![Shell prompt](assets/screenshot-shell.png)
 
 Once a provider connects, fallback auto-exits. If the provider crashes, fallback auto-starts. You don't manage this.
 
