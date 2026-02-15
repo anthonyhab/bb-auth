@@ -4,7 +4,7 @@ Linux desktop authentication that stays out of your way.
 
 ![Fallback prompt](assets/screenshot.png)
 
-**bb-auth** handles polkit elevation, GNOME Keyring unlocks, and GPG pinentry with a unified prompt system. It works with your shell (Waybar, ags, etc.) or shows a standalone fallback window when needed.
+**bb-auth** handles polkit elevation, GNOME Keyring unlocks, and GPG pinentry with a unified prompt system. It shows a lightweight fallback window when your shell can't provide the UI.
 
 ---
 
@@ -12,12 +12,12 @@ Linux desktop authentication that stays out of your way.
 
 | Without bb-auth | With bb-auth |
 |-----------------|--------------|
-| polkit-gnome popup windows | Prompts in your shell bar |
+| polkit-gnome popup windows | Clean prompt window (or your shell bar when providers arrive) |
 | `secret-tool` hangs silently | Prompts appear, then auto-unlock |
 | GPG prompts in terminal | GUI prompts with touch sensor support |
 | Multiple inconsistent UIs | One system, your styling |
 
-**The key idea:** Your shell provides the UI. If it can't, a lightweight fallback window appears automatically. Nothing blocks, nothing hangs.
+**The key idea:** A lightweight fallback window appears automatically when needed. Nothing blocks, nothing hangs.
 
 ---
 
@@ -29,117 +29,116 @@ Linux desktop authentication that stays out of your way.
 
 ---
 
-## Install
+## Quickstart
 
-Pick one:
+### Install
 
-**Arch Linux (AUR)** — recommended for most users
+**Arch Linux (AUR)** — recommended for most users:
 ```bash
 yay -S bb-auth-git
 ```
 
-**Nix**
+**Nix**:
 ```bash
 nix profile install github:anthonyhab/bb-auth#bb-auth
 ```
 
-**Manual build**
+**Manual build**:
 ```bash
 git clone https://github.com/anthonyhab/bb-auth
 cd bb-auth
 ./build-dev.sh install
 ```
 
----
+### Enable the service
 
-## First run
+bb-auth runs as a **user service** (no sudo needed):
 
-1. **Enable the service**
-   ```bash
-   systemctl --user daemon-reload
-   systemctl --user enable --now bb-auth.service
-   ```
-
-2. **Verify it's running**
-   ```bash
-   systemctl --user status bb-auth.service
-   # Should show "active (running)"
-   ```
-
-3. **Test a prompt**
-   ```bash
-   pkexec echo "it works"
-   ```
-
-   You should see a fallback window (we haven't set up shell integration yet).
-
----
-
-## Add to your shell (optional but recommended)
-
-The fallback works fine. A shell provider looks better.
-
-**What's a shell provider?** A small widget that connects to bb-auth and draws prompts in your bar/panel.
-
-| Shell | Provider | Install |
-|-------|----------|---------|
-| ags (Aylur's GTK Shell) | bb-ags (coming soon) | `yay -S bb-ags` |
-| Waybar | bb-waybar (coming soon) | `yay -S bb-waybar` |
-| Custom | Protocol docs below | See `docs/PROTOCOL.md` |
-
-Once a provider connects, fallback auto-exits. If the provider crashes, fallback auto-starts. You don't manage this.
-
----
-
-## Daily use
-
-**Elevation:** `pkexec command` — prompt appears in shell, or fallback window  
-**Keyring:** `secret-tool store --label="Email" service gmail` — unlocks once, stays unlocked  
-**GPG:** `git commit -S` — pinentry with fingerprint reader support
-
-**First boot note:** On a fresh login, the first keyring unlock may prompt twice (once for login keyring, once for the app). This is normal GNOME Keyring behavior, not bb-auth.
-
----
-
-## Common issues
-
-**"pkexec hangs with no prompt"**
 ```bash
-# Check service is running
+systemctl --user daemon-reload
+systemctl --user enable --now bb-auth.service
+```
+
+Verify it's running:
+```bash
+systemctl --user status bb-auth.service
+journalctl --user -u bb-auth.service -n 20 --no-pager
+```
+
+You should see "active (running)" in the status output.
+
+### Test it
+
+```bash
+pkexec echo "it works"
+```
+
+You should see a fallback prompt window. Enter your password — the command should complete successfully.
+
+Other tests:
+```bash
+# Keyring unlock
+secret-tool store --label="Test" service test-app
+
+# GPG signing (if you have a key configured)
+git commit -S -m "test" --allow-empty
+```
+
+---
+
+## Troubleshooting
+
+### "pkexec hangs with no prompt"
+
+```bash
+# Check service status
 systemctl --user status bb-auth.service
 
-# Check logs
-journalctl --user -u bb-auth.service -n 50
+# View recent logs
+journalctl --user -u bb-auth.service -n 50 --no-pager
 
 # Likely cause: another polkit agent is running
 killall polkit-gnome-authentication-agent-1
 systemctl --user restart bb-auth.service
 ```
 
-**"GPG prompts still go to terminal"**
+### "GPG prompts still go to terminal"
+
+First, restart the service (this runs bootstrap automatically):
 ```bash
-# Check pinentry path
+systemctl --user restart bb-auth.service
+```
+
+If that doesn't work, check the pinentry path and manually configure:
+```bash
+# Check if the pinentry wrapper exists
 ls -l /usr/libexec/pinentry-bb
 
-# If missing or wrong, run bootstrap
-bb-auth-bootstrap
-
-# Or manually edit ~/.gnupg/gpg-agent.conf:
-pinentry-program /usr/libexec/pinentry-bb
+# Manually edit gpg-agent config
+# Add to ~/.gnupg/gpg-agent.conf:
+# pinentry-program /usr/libexec/pinentry-bb
+# Then reload:
 gpg-connect-agent reloadagent /bye
 ```
 
-**"Service fails on X11"**
+For development/local installs, the path is `~/.local/libexec/pinentry-bb`.
+
+### "Service fails on X11"
+
 The default service has a Wayland gate. Edit the override:
 ```bash
 systemctl --user edit bb-auth.service
 ```
+
 Remove or comment out:
 ```ini
 # ConditionEnvironment=WAYLAND_DISPLAY
 ```
 
-**"Prompts look wrong / touch sensor not working"**
+Then restart the service.
+
+### "Prompts look wrong / touch sensor not working"
+
 The fallback UI includes touch sensor support (fingerprint, FIDO2). If detection fails:
 ```bash
 # Force password mode
@@ -150,52 +149,68 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for deeper debugging.
 
 ---
 
-## How it works
+## Advanced
 
-```
-┌─────────────────┐     ┌──────────────┐     ┌──────────────────┐
-│   Application   │────▶│   bb-auth    │────▶│  Shell provider  │
-│  (pkexec/gpg)   │     │   daemon     │     │  (Waybar/ags)    │
-└─────────────────┘     └──────────────┘     └──────────────────┘
-                               │
-                               └────▶ Fallback window (if no shell)
-```
+### Environment variables
 
-**Priority system:** Multiple providers can connect. Highest priority wins. Tie breaks by most recent heartbeat. Dead providers auto-prune.
+Set these via service override (`systemctl --user edit bb-auth.service`):
 
-**Conflict handling:** If another polkit agent runs, bb-auth can stop it (default: session-only), warn only, or do nothing. Configurable via `BB_AUTH_CONFLICT_MODE`.
+| Variable | Values | Default | Description |
+|----------|--------|---------|-------------|
+| `BB_AUTH_CONFLICT_MODE` | `session`, `persistent`, `warn` | `session` | How to handle other polkit agents. `session` = stop them for this session only. `persistent` = disable them permanently. `warn` = just log a warning. |
+| `BB_AUTH_FALLBACK_PATH` | Path to binary | auto-detected | Highest-precedence legacy fallback override. If set, daemon launches this binary directly. |
+| `BB_AUTH_PROVIDER_DIR` | Directory path | unset | Optional highest-precedence providers manifest directory (`*.json`). |
 
----
-
-## Configuration
-
-**Environment variables** (set in service override):
-
-| Variable | Values | Default |
-|----------|--------|---------|
-| `BB_AUTH_CONFLICT_MODE` | `session`, `persistent`, `warn` | `session` |
-| `BB_AUTH_FALLBACK_PATH` | Path to binary | auto-detected |
-
-**Service override:**
-```bash
-systemctl --user edit bb-auth.service
-```
-
+Example override:
 ```ini
 [Service]
 Environment=BB_AUTH_CONFLICT_MODE=warn
+Environment=BB_AUTH_PROVIDER_DIR=%h/.config/bb-auth/providers.d
 ```
 
----
+### Drop-in providers (`providers.d`)
 
-## Migration from noctalia-auth
+Provider executables are discovered through manifest files and launched automatically when needed.
+
+Search order (first wins by manifest `id`):
+
+1. `BB_AUTH_PROVIDER_DIR`
+2. `${XDG_CONFIG_HOME:-~/.config}/bb-auth/providers.d`
+3. `${XDG_DATA_HOME:-~/.local/share}/bb-auth/providers.d`
+4. `${CMAKE_INSTALL_DATADIR}/bb-auth/providers.d` (packaged install)
+
+Manifest requirements:
+
+```json
+{
+  "id": "gtk-fallback",
+  "name": "GTK Fallback Provider",
+  "kind": "gtk-fallback",
+  "priority": 8,
+  "exec": "bb-auth-gtk-fallback",
+  "autostart": true
+}
+```
+
+Validation rules:
+- `id`: `[a-z0-9][a-z0-9._-]*`
+- `priority`: integer in `[-1000, 1000]`
+- `exec`: absolute path or basename resolvable in `PATH`
+
+If manifests are invalid or missing, daemon falls back to the existing Qt fallback path. This rollout is additive and backward-compatible.
+
+### Migration from noctalia-auth
+
+If you're upgrading from the old `noctalia-auth` package:
 
 ```bash
-bb-auth-migrate
+/usr/libexec/bb-auth-migrate
 
 # Optional: remove old binaries
-bb-auth-migrate --remove-binaries
+/usr/libexec/bb-auth-migrate --remove-binaries
 ```
+
+For local installs: `~/.local/libexec/bb-auth-migrate`
 
 ---
 
@@ -212,8 +227,10 @@ bb-auth-migrate --remove-binaries
 ./build-dev.sh doctor
 ```
 
+See [docs/PINENTRY_FLOW.md](docs/PINENTRY_FLOW.md) for pinentry flow details and [docs/PROVIDER_CONTRACT.md](docs/PROVIDER_CONTRACT.md) for provider IPC contract.
+
 ---
 
 ## License
 
-MIT
+BSD-3-Clause — see [LICENSE](LICENSE)

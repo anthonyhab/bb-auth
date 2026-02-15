@@ -39,6 +39,14 @@ pkg_check_modules(
   gio-2.0
   json-glib-1.0)
 
+pkg_check_modules(
+  gtk_fallback_deps
+  REQUIRED
+  IMPORTED_TARGET
+  gtk4
+  gio-2.0
+  json-glib-1.0)
+
 qt_standard_project_setup(REQUIRES 6.5)
 enable_testing()
 
@@ -74,6 +82,14 @@ qt_add_executable(bb-auth
     src/core/RequestContext.cpp
     src/core/ipc/IpcServer.cpp
 
+    # Provider plumbing
+    src/core/providers/ProviderManifest.cpp
+    src/core/providers/ProviderManifest.hpp
+    src/core/providers/ProviderDiscovery.cpp
+    src/core/providers/ProviderDiscovery.hpp
+    src/core/providers/ProviderLauncher.cpp
+    src/core/providers/ProviderLauncher.hpp
+
     # Managers
     src/core/managers/KeyringManager.cpp
     src/core/managers/KeyringManager.hpp
@@ -105,7 +121,10 @@ target_link_libraries(bb-auth
         PkgConfig::polkit_deps
         PkgConfig::gcr_deps
 )
-target_compile_definitions(bb-auth PRIVATE BB_AUTH_VERSION="${VER}")
+target_compile_definitions(bb-auth
+    PRIVATE
+        BB_AUTH_VERSION="${VER}"
+        BB_AUTH_PROVIDER_SYSTEM_DIR="${CMAKE_INSTALL_FULL_DATADIR}/bb-auth/providers.d")
 
 include(GNUInstallDirs)
 
@@ -148,10 +167,32 @@ target_link_libraries(bb-auth-fallback
 
 install(TARGETS bb-auth-fallback
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
+
+add_executable(bb-auth-gtk-fallback
+    src/providers/gtk-fallback/main.c
+    src/providers/gtk-fallback/GtkFallbackClient.c
+    src/providers/gtk-fallback/GtkFallbackClient.h
+    src/providers/gtk-fallback/GtkFallbackWindow.c
+    src/providers/gtk-fallback/GtkFallbackWindow.h
+)
+
+target_link_libraries(bb-auth-gtk-fallback
+    PRIVATE
+        PkgConfig::gtk_fallback_deps)
+
+install(TARGETS bb-auth-gtk-fallback
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
+
+install(FILES assets/providers.d/gtk-fallback.json
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth/providers.d)
+
 qt_add_executable(bb-auth-tests
     tests/test_session_info.cpp
     tests/test_fallback_touch_model.cpp
     tests/test_agent_routing.cpp
+    tests/test_provider_manifest.cpp
+    tests/test_provider_discovery.cpp
+    tests/test_provider_launcher.cpp
 
     src/core/Session.cpp
     src/core/Session.hpp
@@ -161,6 +202,12 @@ qt_add_executable(bb-auth-tests
     src/core/agent/ProviderRegistry.hpp
     src/core/agent/EventRouter.cpp
     src/core/agent/EventRouter.hpp
+    src/core/providers/ProviderManifest.cpp
+    src/core/providers/ProviderManifest.hpp
+    src/core/providers/ProviderDiscovery.cpp
+    src/core/providers/ProviderDiscovery.hpp
+    src/core/providers/ProviderLauncher.cpp
+    src/core/providers/ProviderLauncher.hpp
 
     src/fallback/prompt/TextNormalize.cpp
     src/fallback/prompt/TextNormalize.hpp
