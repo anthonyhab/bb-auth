@@ -18,8 +18,8 @@ makedepends=(
     'cmake'
 )
 provides=('bb-auth' 'bb-auth-git')
-conflicts=('bb-auth' 'noctalia-auth-git' 'noctalia-polkit-git' 'noctalia-unofficial-auth-agent')
-replaces=('noctalia-auth-git' 'noctalia-polkit-git')
+conflicts=('bb-auth')
+replaces=('noctalia-auth-git' 'noctalia-polkit-git' 'noctalia-unofficial-auth-agent-git')
 source=("${pkgname}::git+https://github.com/anthonyhab/bb-auth.git")
 sha256sums=('SKIP')
 
