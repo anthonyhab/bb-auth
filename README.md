@@ -83,7 +83,7 @@ The fallback works fine. A shell provider looks better.
 
 | Shell | Provider | Status |
 |-------|----------|--------|
-| Noctalia Shell | [bb-auth plugin](https://github.com/anthonyhab/bibe-plugins/bb-auth/) | Available |
+| Noctalia Shell | [bb-auth plugin](https://github.com/anthonyhab/noctalia-plugins/) | Available |
 | Custom | Protocol docs | See `docs/PROVIDER_CONTRACT.md` |
 
 ![Shell prompt](assets/screenshot-shell.png)
