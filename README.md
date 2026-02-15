@@ -81,12 +81,10 @@ The fallback works fine. A shell provider looks better.
 
 **What's a shell provider?** A small widget that connects to bb-auth and draws prompts in your bar/panel.
 
-| Shell | Provider | Status | Install |
-|-------|----------|--------|---------|
-| Noctalia Shell | [bb-auth plugin](https://github.com/anthonyhab/bibe-plugins/bb-auth/) | Available | See plugin repo |
-| ags (Aylur's GTK Shell) | bb-ags | Planned | `yay -S bb-ags` |
-| Waybar | bb-waybar | Planned | `yay -S bb-waybar` |
-| Custom | Protocol docs | See `docs/PROVIDER_CONTRACT.md` | Manual |
+| Shell | Provider | Status |
+|-------|----------|--------|
+| Noctalia Shell | [bb-auth plugin](https://github.com/anthonyhab/bibe-plugins/bb-auth/) | Available |
+| Custom | Protocol docs | See `docs/PROVIDER_CONTRACT.md` |
 
 ![Shell prompt](assets/screenshot-shell.png)
 
