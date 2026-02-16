@@ -1,4 +1,4 @@
-# Maintainer: Anthony Habibe <bb@hab.rip>
+# Maintainer: anthonyhab
 pkgname=bb-auth-git
 pkgver=r43.fc40397
 pkgrel=1
