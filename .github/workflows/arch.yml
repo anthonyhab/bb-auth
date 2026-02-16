@@ -15,7 +15,7 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gcr-4 json-glib
+          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gnome-keyring json-glib
 
       - name: Checkout repository
         uses: actions/checkout@v4

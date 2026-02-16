@@ -47,7 +47,8 @@ nix profile install github:anthonyhab/bb-auth#bb-auth
 ```bash
 git clone https://github.com/anthonyhab/bb-auth
 cd bb-auth
-./build-dev.sh install
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --install build
 ```
 
 ---
@@ -203,14 +204,15 @@ bb-auth-migrate --remove-binaries
 ## Development
 
 ```bash
-# Build and run tests
-./build-dev.sh test
+# Build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
 
-# Run with verbose logging
-./build-dev.sh run --verbose
+# Run tests
+ctest --test-dir build --output-on-failure
 
-# Check wiring
-./build-dev.sh doctor
+# Install locally
+cmake --install build
 ```
 
 ---

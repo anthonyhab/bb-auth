@@ -10,7 +10,7 @@ depends=(
     'qt6-base'
     'polkit-qt6'
     'polkit'
-    'gcr-4'
+    'gnome-keyring'
     'json-glib'
 )
 makedepends=(
