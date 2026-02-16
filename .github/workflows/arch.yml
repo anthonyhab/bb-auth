@@ -12,13 +12,13 @@ jobs:
     container:
       image: archlinux:base-devel
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gnome-keyring json-glib
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
       - name: Build with CMake
         run: |
@@ -29,6 +29,7 @@ jobs:
 
       - name: Run tests
         run: |
+          export QT_QPA_PLATFORM=offscreen
           ctest --test-dir build --output-on-failure
 
       - name: Test PKGBUILD

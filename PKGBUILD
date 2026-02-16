@@ -18,7 +18,6 @@ makedepends=(
     'cmake'
 )
 optdepends=(
-    'gnome-keyring: GNOME Keyring integration'
     'fprintd: Fingerprint authentication support'
     'libfido2: FIDO2 device support'
 )
