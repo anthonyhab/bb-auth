@@ -16,9 +16,6 @@ find_package(PkgConfig REQUIRED)
 
 if(NOT MSVC)
     add_compile_options(-Wall -Wextra -Werror=format-security)
-    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_definitions(_FORTIFY_SOURCE=2)
-    endif()
     add_link_options(-Wl,-z,relro -Wl,-z,now)
 endif()
 
