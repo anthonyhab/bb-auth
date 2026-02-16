@@ -17,7 +17,12 @@ makedepends=(
     'git'
     'cmake'
 )
-provides=('bb-auth' 'bb-auth-git')
+optdepends=(
+    'gnome-keyring: GNOME Keyring integration'
+    'fprintd: Fingerprint authentication support'
+    'libfido2: FIDO2 device support'
+)
+provides=('bb-auth')
 conflicts=('bb-auth')
 replaces=('noctalia-auth-git' 'noctalia-polkit-git' 'noctalia-unofficial-auth-agent-git')
 source=("${pkgname}::git+https://github.com/anthonyhab/bb-auth.git")
@@ -34,6 +39,11 @@ build() {
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr
     cmake --build build
+}
+
+check() {
+    cd "$pkgname"
+    ctest --test-dir build --output-on-failure
 }
 
 package() {

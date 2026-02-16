@@ -1,0 +1,45 @@
+name: Arch Linux Build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gcr-4 json-glib
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build with CMake
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build build
+
+      - name: Run tests
+        run: |
+          ctest --test-dir build --output-on-failure
+
+      - name: Test PKGBUILD
+        run: |
+          # Verify PKGBUILD can be sourced without errors
+          bash -n PKGBUILD
+          
+      - name: Install and verify
+        run: |
+          cmake --install build --prefix /tmp/install-test
+          ls -la /tmp/install-test/usr/libexec/
+          ls -la /tmp/install-test/usr/lib/systemd/user/ || echo "No systemd files"
+          ls -la /tmp/install-test/usr/share/dbus-1/services/ || echo "No dbus services"
+
