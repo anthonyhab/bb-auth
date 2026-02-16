@@ -126,6 +126,10 @@ target_compile_definitions(bb-auth
         BB_AUTH_VERSION="${VER}"
         BB_AUTH_PROVIDER_SYSTEM_DIR="${CMAKE_INSTALL_FULL_DATADIR}/bb-auth/providers.d")
 
+# Configurable gcr-prompter path
+set(BB_AUTH_GCR_PROMPTER_BINARY "/usr/lib/gcr-prompter" CACHE STRING "Path to the system gcr-prompter binary")
+target_compile_definitions(bb-auth PRIVATE GCR_PROMPTER_BINARY="\\"${BB_AUTH_GCR_PROMPTER_BINARY}\\"")
+
 include(GNUInstallDirs)
 
 set(LIBEXECDIR ${CMAKE_INSTALL_FULL_LIBEXECDIR})

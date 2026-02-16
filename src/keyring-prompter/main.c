@@ -11,8 +11,6 @@
 #include "bb-prompt.h"
 #include "ipc-client.h"
 
-#define FALLBACK_GCR_PROMPTER "/usr/lib/gcr-prompter"
-
 /* Entry point callable from C++ unified binary */
 #ifdef __cplusplus
 extern "C" {
@@ -78,20 +76,43 @@ static void on_name_lost(GDBusConnection* connection G_GNUC_UNUSED, const gchar*
     g_main_loop_quit(main_loop);
 }
 
+static const char* find_gcr_prompter(void) {
+    static const char* standard_paths[] = {
+        GCR_PROMPTER_BINARY,
+        "/usr/lib/gcr-prompter",
+        "/usr/libexec/gcr-prompter",
+        "/usr/lib/gnome-keyring/gcr-prompter",
+        "/usr/lib/x86_64-linux-gnu/gcr-prompter",
+        NULL
+    };
+
+    for (int i = 0; standard_paths[i] != NULL; i++) {
+        if (access(standard_paths[i], X_OK) == 0) {
+            return standard_paths[i];
+        }
+    }
+
+    /* If none of the standard paths exist, return the compile-time default
+     * even if it doesn't exist, so that the error message will show it. */
+    return GCR_PROMPTER_BINARY;
+}
+
 static void fallback_to_gcr_prompter(char* argv[]) {
-    g_message("Falling back to %s", FALLBACK_GCR_PROMPTER);
+    const char* prompter_path = find_gcr_prompter();
+
+    g_message("Falling back to %s", prompter_path);
 
     /* Check if fallback exists */
-    if (access(FALLBACK_GCR_PROMPTER, X_OK) != 0) {
-        g_warning("Fallback %s not available: %s", FALLBACK_GCR_PROMPTER, g_strerror(errno));
+    if (access(prompter_path, X_OK) != 0) {
+        g_warning("Fallback %s not available: %s", prompter_path, g_strerror(errno));
         exit(1);
     }
 
     /* Exec the original gcr-prompter, inheriting our argv */
-    execv(FALLBACK_GCR_PROMPTER, argv);
+    execv(prompter_path, argv);
 
     /* If exec returns, it failed */
-    g_warning("Failed to exec %s: %s", FALLBACK_GCR_PROMPTER, g_strerror(errno));
+    g_warning("Failed to exec %s: %s", prompter_path, g_strerror(errno));
     exit(1);
 }
 
