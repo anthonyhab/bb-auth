@@ -40,7 +40,7 @@ jobs:
       - name: Install and verify
         run: |
           cmake --install build --prefix /tmp/install-test
-          ls -la /tmp/install-test/usr/libexec/
-          ls -la /tmp/install-test/usr/lib/systemd/user/ || echo "No systemd files"
-          ls -la /tmp/install-test/usr/share/dbus-1/services/ || echo "No dbus services"
+          ls -la /tmp/install-test/libexec/
+          ls -la /tmp/install-test/lib/systemd/user/ || echo "No systemd files"
+          ls -la /tmp/install-test/share/dbus-1/services/ || echo "No dbus services"
 

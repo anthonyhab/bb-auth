@@ -186,14 +186,16 @@ install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-bootstrap
 # Install symlinks for protocol compatibility
 install(CODE "
     execute_process(
-        COMMAND ${CMAKE_COMMAND} -E create_symlink
+        COMMAND \${CMAKE_COMMAND} -E create_symlink
             bb-auth
-            \$ENV{DESTDIR}${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-keyring-prompter
+            bb-keyring-prompter
+        WORKING_DIRECTORY \$ENV{DESTDIR}\${CMAKE_INSTALL_FULL_LIBEXECDIR}
     )
     execute_process(
-        COMMAND ${CMAKE_COMMAND} -E create_symlink
+        COMMAND \${CMAKE_COMMAND} -E create_symlink
             bb-auth
-            \$ENV{DESTDIR}${CMAKE_INSTALL_FULL_LIBEXECDIR}/pinentry-bb
+            pinentry-bb
+        WORKING_DIRECTORY \$ENV{DESTDIR}\${CMAKE_INSTALL_FULL_LIBEXECDIR}
     )
 ")
 
@@ -214,3 +216,17 @@ install(FILES ${CMAKE_BINARY_DIR}/org.gnome.keyring.SystemPrompter.service
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/bb-auth-migrate.sh
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         RENAME bb-auth-migrate)
+
+# Uninstall target
+add_custom_target(uninstall
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-fallback"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-bootstrap"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-keyring-prompter"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBEXECDIR}/pinentry-bb"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBDIR}/systemd/user/bb-auth.service"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_DATADIR}/dbus-1/services/org.bb.auth.service"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_DATADIR}/bb-auth/org.gnome.keyring.SystemPrompter.service"
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_BINDIR}/bb-auth-migrate"
+    COMMENT "Uninstalling bb-auth..."
+)
