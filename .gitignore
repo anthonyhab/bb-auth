@@ -1,5 +1,7 @@
 # Prerequisites
 *.d
+!assets/providers.d/
+!assets/providers.d/*.json
 
 # Compiled Object files
 *.slo
