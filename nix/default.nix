@@ -7,6 +7,7 @@
   polkit,
   qt6,
   gcr_4,
+  gtk4,
   glib,
   json-glib,
   version ? "0",
@@ -38,6 +39,7 @@ in
       qt6.qtbase
       # For keyring-prompter
       gcr_4
+      gtk4
       glib
       json-glib
     ];
