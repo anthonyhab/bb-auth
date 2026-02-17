@@ -10,6 +10,7 @@ int runProviderDiscoveryTests(int argc, char** argv);
 int runProviderLauncherTests(int argc, char** argv);
 int runTextNormalizeTests(int argc, char** argv);
 int runSessionStoreTests(int argc, char** argv);
+int runClassifyRequestTests(int argc, char** argv);
 
 class SessionInfoTest : public QObject {
     Q_OBJECT
@@ -73,6 +74,7 @@ int main(int argc, char** argv) {
     const int       routingResult   = runAgentRoutingTests(argc, argv);
     const int       fallbackResult  = runFallbackWindowTouchModelTests(argc, argv);
     const int       storeResult     = runSessionStoreTests(argc, argv);
+    const int       classifyResult  = runClassifyRequestTests(argc, argv);
     const int       normalizeResult = runTextNormalizeTests(argc, argv);
     const int       manifestResult  = runProviderManifestTests(argc, argv);
     const int       discoveryResult = runProviderDiscoveryTests(argc, argv);
@@ -88,6 +90,9 @@ int main(int argc, char** argv) {
     }
     if (storeResult != 0) {
         return storeResult;
+    }
+    if (classifyResult != 0) {
+        return classifyResult;
     }
     if (normalizeResult != 0) {
         return normalizeResult;
