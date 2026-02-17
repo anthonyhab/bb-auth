@@ -6,7 +6,9 @@
 
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QTemporaryDir>
 #include <QUuid>
+#include <QDir>
 
 #include <memory>
 #include <utility>
@@ -17,6 +19,13 @@ namespace bb {
 
     namespace {
 
+#define REQUIRE_LOCAL_SOCKET_LISTENING(fixture)                                                                                                                  \
+    do {                                                                                                                                                        \
+        if (!(fixture).isListening()) {                                                                                                                         \
+            QSKIP(qPrintable(QStringLiteral("Skipping local-socket-dependent test: %1").arg((fixture).errorString())));                                        \
+        }                                                                                                                                                       \
+    } while (false)
+
         struct ConnectedSocket {
             std::unique_ptr<QLocalSocket> client;
             std::unique_ptr<QLocalSocket> server;
@@ -25,26 +34,41 @@ namespace bb {
         class LocalSocketFixture {
           public:
             LocalSocketFixture() {
-                m_serverName = QString("bb-auth-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-                QLocalServer::removeServer(m_serverName);
-                m_isListening = m_server.listen(m_serverName);
+                m_tempDir = std::make_unique<QTemporaryDir>(QDir::tempPath() + "/bb-auth-test-XXXXXX");
+                if (!m_tempDir->isValid()) {
+                    m_lastError = "failed to create temporary directory for local socket";
+                    return;
+                }
+
+                m_serverPath = m_tempDir->path() + "/agent.sock";
+                QLocalServer::removeServer(m_serverPath);
+                m_isListening = m_server.listen(m_serverPath);
+                if (!m_isListening) {
+                    m_lastError = m_server.errorString();
+                }
             }
 
             bool isListening() const {
                 return m_isListening;
             }
+            QString errorString() const {
+                return m_lastError;
+            }
             ConnectedSocket connect() {
                 auto client = std::make_unique<QLocalSocket>();
-                client->connectToServer(m_serverName);
+                client->connectToServer(m_serverPath);
                 if (!client->waitForConnected(1000)) {
+                    m_lastError = client->errorString();
                     return ConnectedSocket{};
                 }
 
                 if (!m_server.waitForNewConnection(1000)) {
+                    m_lastError = m_server.errorString();
                     return ConnectedSocket{};
                 }
                 QLocalSocket* serverSocket = m_server.nextPendingConnection();
                 if (!serverSocket) {
+                    m_lastError = "failed to get pending server socket";
                     return ConnectedSocket{};
                 }
                 serverSocket->setParent(nullptr);
@@ -52,9 +76,11 @@ namespace bb {
             }
 
           private:
-            QLocalServer m_server;
-            QString      m_serverName;
-            bool         m_isListening = false;
+            QLocalServer                  m_server;
+            std::unique_ptr<QTemporaryDir> m_tempDir;
+            QString                       m_serverPath;
+            QString                       m_lastError;
+            bool                          m_isListening = false;
         };
 
         struct SentEvent {
@@ -89,7 +115,7 @@ namespace bb {
 
     void AgentRoutingTest::providerRegistry_selectsHighestPriority() {
         LocalSocketFixture fixture;
-        QVERIFY(fixture.isListening());
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
 
         qint64                  nowMs = 1000;
         agent::ProviderRegistry registry([&nowMs] { return nowMs; });
@@ -119,7 +145,7 @@ namespace bb {
 
     void AgentRoutingTest::providerRegistry_tiesBreakByMostRecentHeartbeat() {
         LocalSocketFixture fixture;
-        QVERIFY(fixture.isListening());
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
 
         qint64                  nowMs = 1000;
         agent::ProviderRegistry registry([&nowMs] { return nowMs; });
@@ -150,7 +176,7 @@ namespace bb {
 
     void AgentRoutingTest::providerRegistry_unregActiveRecomputes() {
         LocalSocketFixture fixture;
-        QVERIFY(fixture.isListening());
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
 
         qint64                  nowMs = 1000;
         agent::ProviderRegistry registry([&nowMs] { return nowMs; });
@@ -188,7 +214,7 @@ namespace bb {
 
     void AgentRoutingTest::providerRegistry_prunesStaleAndDisconnected() {
         LocalSocketFixture fixture;
-        QVERIFY(fixture.isListening());
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
 
         qint64                  nowMs = 1000;
         agent::ProviderRegistry registry([&nowMs] { return nowMs; });
@@ -243,7 +269,7 @@ namespace bb {
 
     void AgentRoutingTest::eventQueue_drainsWaitersInFifoOrder() {
         LocalSocketFixture fixture;
-        QVERIFY(fixture.isListening());
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
 
         ConnectedSocket w1 = fixture.connect();
         QVERIFY(w1.server != nullptr);
@@ -294,7 +320,7 @@ namespace bb {
 
     void AgentRoutingTest::eventQueue_removeWaiterPreventsSend() {
         LocalSocketFixture fixture;
-        QVERIFY(fixture.isListening());
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
 
         ConnectedSocket w1 = fixture.connect();
         QVERIFY(w1.server != nullptr);
@@ -313,7 +339,7 @@ namespace bb {
 
     void AgentRoutingTest::eventRouter_routesSessionEventsToActiveProviderOnly() {
         LocalSocketFixture fixture;
-        QVERIFY(fixture.isListening());
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
 
         qint64                  nowMs = 1000;
         agent::ProviderRegistry registry([&nowMs] { return nowMs; });
@@ -355,7 +381,7 @@ namespace bb {
 
     void AgentRoutingTest::eventRouter_broadcastsSessionEventsWhenNoActiveProvider() {
         LocalSocketFixture fixture;
-        QVERIFY(fixture.isListening());
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
 
         qint64                  nowMs = 0;
         agent::ProviderRegistry registry([&nowMs] { return nowMs; });
@@ -386,7 +412,7 @@ namespace bb {
 
     void AgentRoutingTest::eventRouter_broadcastsNonSessionEventsEvenWithActiveProvider() {
         LocalSocketFixture fixture;
-        QVERIFY(fixture.isListening());
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
 
         qint64                  nowMs = 1000;
         agent::ProviderRegistry registry([&nowMs] { return nowMs; });
