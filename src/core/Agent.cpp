@@ -16,6 +16,7 @@
 #include <QStandardPaths>
 #include <QUuid>
 #include <QFileInfo>
+#include <QLockFile>
 
 #include <memory>
 #include <pwd.h>
@@ -552,6 +553,16 @@ void CAgent::ensureFallbackUiRunning(const QString& reason) {
         return;
     }
 
+    {
+        const QString lockPath = QFileInfo(m_socketPath).absolutePath() + "/bb-auth-fallback.lock";
+        QLockFile     lock(lockPath);
+        if (!lock.tryLock(0)) {
+            // Lock held by another process (presumably the fallback UI), so it's running.
+            return;
+        }
+        // We acquired the lock, so the UI is not running. Release it so the new process can take it.
+        lock.unlock();
+    }
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     if ((nowMs - m_lastFallbackLaunchMs) < FALLBACK_LAUNCH_COOLDOWN_MS) {
         return;
