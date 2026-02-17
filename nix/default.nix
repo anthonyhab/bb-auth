@@ -9,6 +9,7 @@
   gcr_4,
   glib,
   json-glib,
+  gtk4,
   version ? "0",
 }: let
   inherit (lib.sources) cleanSource cleanSourceWith;
@@ -40,6 +41,7 @@ in
       gcr_4
       glib
       json-glib
+      gtk4
     ];
 
     meta = {

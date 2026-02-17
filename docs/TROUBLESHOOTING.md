@@ -57,35 +57,12 @@ Daemon should launch fallback UI automatically.
 Check:
 
 ```bash
-# Check legacy binary exists (packaged path)
+# Check binary exists (packaged path)
 ls -l /usr/libexec/bb-auth-fallback
 
 # Or local install path
 ls -l ~/.local/libexec/bb-auth-fallback
 
-# Check provider manifests (drop-in providers)
-ls -l ~/.config/bb-auth/providers.d
-ls -l ~/.local/share/bb-auth/providers.d
-
 # Check logs
-journalctl --user -u bb-auth.service -n 200 --no-pager | grep -E "Provider launch|Discovered provider manifests|fallback"
+journalctl --user -u bb-auth.service -n 200 --no-pager | grep "Launched fallback UI"
 ```
-
-If provider discovery is misconfigured, set explicit directory:
-
-```ini
-# systemctl --user edit bb-auth.service
-[Service]
-Environment=BB_AUTH_PROVIDER_DIR=%h/.config/bb-auth/providers.d
-```
-
-Then restart:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user restart bb-auth.service
-```
-
-Rollback to legacy behavior:
-- Remove/disable provider manifests, or
-- Set `BB_AUTH_FALLBACK_PATH` to a known-good fallback binary.
