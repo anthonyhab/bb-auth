@@ -12,6 +12,7 @@ int runTextNormalizeTests(int argc, char** argv);
 int runSessionStoreTests(int argc, char** argv);
 int runClassifyRequestTests(int argc, char** argv);
 int runPromptExtractorsTests(int argc, char** argv);
+int runRequestContextTests(int argc, char** argv);
 
 class SessionInfoTest : public QObject {
     Q_OBJECT
@@ -71,16 +72,17 @@ void SessionInfoTest::updatedEventCanContainErrorAndInfo() {
 int main(int argc, char** argv) {
     QApplication    app(argc, argv);
     SessionInfoTest sessionInfoTest;
-    const int       sessionResult    = QTest::qExec(&sessionInfoTest, argc, argv);
-    const int       routingResult    = runAgentRoutingTests(argc, argv);
-    const int       fallbackResult   = runFallbackWindowTouchModelTests(argc, argv);
-    const int       storeResult      = runSessionStoreTests(argc, argv);
-    const int       classifyResult   = runClassifyRequestTests(argc, argv);
-    const int       extractorsResult = runPromptExtractorsTests(argc, argv);
-    const int       normalizeResult  = runTextNormalizeTests(argc, argv);
-    const int       manifestResult   = runProviderManifestTests(argc, argv);
-    const int       discoveryResult  = runProviderDiscoveryTests(argc, argv);
-    const int       launcherResult   = runProviderLauncherTests(argc, argv);
+    const int       sessionResult        = QTest::qExec(&sessionInfoTest, argc, argv);
+    const int       routingResult        = runAgentRoutingTests(argc, argv);
+    const int       fallbackResult       = runFallbackWindowTouchModelTests(argc, argv);
+    const int       storeResult          = runSessionStoreTests(argc, argv);
+    const int       classifyResult       = runClassifyRequestTests(argc, argv);
+    const int       extractorsResult     = runPromptExtractorsTests(argc, argv);
+    const int       requestContextResult = runRequestContextTests(argc, argv);
+    const int       normalizeResult      = runTextNormalizeTests(argc, argv);
+    const int       manifestResult       = runProviderManifestTests(argc, argv);
+    const int       discoveryResult      = runProviderDiscoveryTests(argc, argv);
+    const int       launcherResult       = runProviderLauncherTests(argc, argv);
     if (sessionResult != 0) {
         return sessionResult;
     }
@@ -98,6 +100,9 @@ int main(int argc, char** argv) {
     }
     if (extractorsResult != 0) {
         return extractorsResult;
+    }
+    if (requestContextResult != 0) {
+        return requestContextResult;
     }
     if (normalizeResult != 0) {
         return normalizeResult;

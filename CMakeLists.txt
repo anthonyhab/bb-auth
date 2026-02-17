@@ -201,6 +201,7 @@ qt_add_executable(bb-auth-tests
     tests/test_session_store.cpp
     tests/test_classify_request.cpp
     tests/test_prompt_extractors.cpp
+    tests/test_request_context.cpp
 
     src/core/Session.cpp
     src/core/Session.hpp
