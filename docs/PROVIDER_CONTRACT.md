@@ -1,209 +1,301 @@
-# Provider Contract (IPC v2.0)
+# Provider Contract
 
-This document defines the **drop-in UI provider contract** for `bb-auth`.
+This document describes the IPC protocol for shell providers (Waybar, ags, custom widgets) that want to display bb-auth prompts in their UI.
 
-Any executable that follows this contract can act as a provider without daemon code changes.
+## Overview
 
-## Compatibility
+**Architecture**
+- bb-auth daemon runs as a systemd user service
+- Shell providers connect via Unix domain socket
+- JSON messages over newline-delimited stream
+- Providers register themselves with priority
+- Highest priority active provider receives all prompt events
 
-- Protocol version: **2.0**
-- Transport: **line-delimited JSON** over the daemon local socket
-- Backward compatibility target: current daemon behavior in `src/core/Agent.cpp`, `src/core/Session.*`, and `src/core/agent/*`
+**Socket Location**
+```
+$XDG_RUNTIME_DIR/bb-auth.sock
+```
 
-## Transport and framing
+## Connection
 
-- Connect to daemon socket (`$XDG_RUNTIME_DIR/bb-auth.sock` unless explicitly overridden by launcher args).
-- Each message must be one JSON object followed by `\n`.
-- Messages are independent; no envelope wrapping.
+Providers connect to the daemon using local Unix sockets. The daemon accepts multiple concurrent connections.
 
-## Required provider behavior
+```python
+# Python example
+import socket
+import json
 
-A conforming provider must:
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect(os.path.join(os.environ['XDG_RUNTIME_DIR'], 'bb-auth.sock'))
+```
 
-1. Connect to daemon socket.
-2. Send `ui.register` with provider metadata.
-3. Send `subscribe`.
-4. Send `ui.heartbeat` periodically (recommended <= 4s; daemon timeout is 15s).
-5. Handle incoming events:
-   - `session.created`
-   - `session.updated`
-   - `session.closed`
-   - `ui.active`
-6. Submit user decisions with:
-   - `session.respond`
-   - `session.cancel`
-7. Handle daemon `error` replies; specifically treat `"Not active UI provider"` as authoritative and stop interactive submission while inactive.
+## Message Format
 
-## Provider -> Daemon messages
-
-### Register provider
+All messages are JSON objects, one per line, newline-delimited.
 
 ```json
-{"type":"ui.register","name":"my-provider","kind":"gtk-fallback","priority":10}
+{"type": "ping"}
+```
+
+## Provider Registration
+
+Providers must register to receive prompt events.
+
+### Register
+
+Request:
+```json
+{
+  "type": "ui.register",
+  "name": "MyShell",
+  "kind": "waybar-widget",
+  "priority": 10
+}
 ```
 
 Fields:
-- `name` (string): human-readable provider name
-- `kind` (string): provider class label
-- `priority` (int): higher wins active-provider selection
+- `name`: Human-readable provider name
+- `kind`: Provider type (e.g., "waybar-widget", "ags", "custom")
+- `priority`: Integer, higher = preferred (default: 0)
+
+Response:
+```json
+{
+  "type": "ui.registered",
+  "id": "uuid-here",
+  "active": true,
+  "priority": 10
+}
+```
 
 ### Heartbeat
 
-```json
-{"type":"ui.heartbeat","id":"<provider-id>"}
-```
-
-Notes:
-- `id` is returned in `ui.registered`.
-- Daemon currently keys heartbeat by socket and tolerates `id` mismatch/absence; providers should still send `id` for compatibility.
-
-### Subscribe to events
+Providers must heartbeat every ~2 seconds to stay alive:
 
 ```json
-{"type":"subscribe"}
+{"type": "ui.heartbeat"}
 ```
 
-### Submit response
-
-```json
-{"type":"session.respond","id":"<session-id>","response":"secret"}
-```
-
-### Cancel session
-
-```json
-{"type":"session.cancel","id":"<session-id>"}
-```
-
-## Daemon -> Provider messages
-
-### Registration acknowledgement
-
-```json
-{"type":"ui.registered","id":"<provider-id>","active":true,"priority":10}
-```
-
-Fields:
-- `id` (string): daemon-assigned provider id
-- `active` (bool): whether this provider is currently active
-- `priority` (int): accepted provider priority
-
-### Subscription acknowledgement
-
-```json
-{"type":"subscribed","sessionCount":1,"active":true}
-```
-
-Fields:
-- `sessionCount` (int): number of interactive sessions sent to this socket
-- `active` (bool, optional): active-provider state for registered providers
-
-### Active provider status broadcast
-
-```json
-{"type":"ui.active","active":true,"id":"<provider-id>","name":"...","kind":"...","priority":10}
-```
-
-When no active provider exists:
-
-```json
-{"type":"ui.active","active":false}
-```
-
-### Session created
-
+Response:
 ```json
 {
-  "type":"session.created",
-  "id":"<session-id>",
-  "source":"polkit|keyring|pinentry",
-  "context":{
-    "message":"...",
-    "requestor":{
-      "name":"...",
-      "icon":"...",
-      "fallbackLetter":"A",
-      "fallbackKey":"optional",
-      "pid":1234
-    },
-    "actionId":"optional (polkit)",
-    "user":"optional (polkit)",
-    "details":{},
-    "keyringName":"optional (keyring)",
-    "description":"optional (pinentry)",
-    "keyinfo":"optional (pinentry)",
-    "curRetry":0,
-    "maxRetries":3,
-    "confirmOnly":false,
-    "repeat":false
+  "type": "ok",
+  "active": true
+}
+```
+
+**Important**: Stale providers (no heartbeat for 10+ seconds) are automatically pruned.
+
+### Unregister
+
+Clean disconnect:
+```json
+{"type": "ui.unregister"}
+```
+
+## Receiving Events
+
+Subscribe to session events:
+
+```json
+{"type": "subscribe"}
+```
+
+Response:
+```json
+{
+  "type": "subscribed",
+  "sessionCount": 1,
+  "active": true
+}
+```
+
+You'll receive events for all active sessions and new sessions as they are created.
+
+### Event Types
+
+#### Session Created
+```json
+{
+  "type": "session.created",
+  "id": "cookie-here",
+  "source": "polkit",
+  "message": "Authentication required",
+  "actionId": "org.freedesktop.policykit.exec",
+  "user": "root",
+  "requestor": {
+    "name": "pkexec",
+    "icon": "dialog-password",
+    "fallbackLetter": "P",
+    "fallbackKey": "pkexec",
+    "pid": 12345
   }
 }
 ```
 
-Notes:
-- `context.requestor` fields may be empty/missing except `name` fallback defaults to `"Unknown"`.
-- Source-specific context fields appear only when relevant.
+Sources: `polkit`, `keyring`, `pinentry`
 
-### Session updated
-
+#### Session Updated
 ```json
 {
-  "type":"session.updated",
-  "id":"<session-id>",
-  "state":"prompting",
-  "prompt":"...",
-  "echo":false,
-  "curRetry":0,
-  "maxRetries":3,
-  "error":"optional",
-  "info":"optional"
+  "type": "session.updated",
+  "id": "cookie-here",
+  "prompt": "Password:",
+  "echo": false,
+  "error": null
 }
 ```
 
-Notes:
-- `curRetry` and `maxRetries` are present for pinentry sessions.
-- `error` and `info` are optional, transient display fields.
-
-### Session closed
-
+#### Session Closed
 ```json
-{"type":"session.closed","id":"<session-id>","result":"success|cancelled|error","error":"optional"}
+{
+  "type": "session.closed",
+  "id": "cookie-here",
+  "result": "success"
+}
 ```
 
-### Generic replies
+Results: `success`, `cancelled`, `error`
 
+#### Provider Status
 ```json
-{"type":"ok", ...}
-{"type":"error","message":"..."}
-{"type":"pong", ...}
+{
+  "type": "ui.active",
+  "active": true,
+  "id": "uuid",
+  "name": "MyShell",
+  "kind": "waybar-widget",
+  "priority": 10
+}
 ```
 
-## Routing and authorization semantics (must preserve)
+## Responding to Prompts
 
-- Session events are routed to:
-  - active provider socket (if one exists), and
-  - explicit `next` waiters.
-- Non-session events (`ui.active`, etc.) are broadcast to subscribers.
-- If a provider is not active, `session.respond` / `session.cancel` must be rejected with:
+When you're the active provider, you can respond to sessions:
 
+### Submit Response
 ```json
-{"type":"error","message":"Not active UI provider"}
+{
+  "type": "session.respond",
+  "id": "cookie-here",
+  "response": "user-password"
+}
 ```
 
-Providers must treat this as an authorization boundary, not a transient warning.
+Response:
+```json
+{"type": "ok"}
+```
 
-## Lifecycle expectations
+### Cancel Session
+```json
+{
+  "type": "session.cancel",
+  "id": "cookie-here"
+}
+```
 
-1. Connect.
-2. Register.
-3. Subscribe.
-4. Process `ui.active` transitions.
-5. Render interactive sessions only while active.
-6. Heartbeat continuously while connected.
-7. On disconnect/error, reconnect with backoff and repeat registration/subscription.
+Response:
+```json
+{"type": "ok"}
+```
 
-## Conformance notes
+## Keyring and Pinentry
 
-- The in-tree Qt fallback (`src/fallback/*`) is a reference provider implementation.
-- The in-tree GTK fallback example (`src/providers/gtk-fallback/*`) is an additional reference provider.
-- Future protocol revisions must update this document and preserve compatibility guarantees for v2 providers where possible.
+### Keyring Request
+```json
+{
+  "type": "keyring_request",
+  "operation": "unlock",
+  "keyring": "login"
+}
+```
+
+### Pinentry Request
+```json
+{
+  "type": "pinentry_request",
+  "title": "Unlock key",
+  "description": "Enter passphrase",
+  "prompt": "Passphrase:"
+}
+```
+
+## Utility Messages
+
+### Ping
+```json
+{"type": "ping"}
+```
+
+Response:
+```json
+{
+  "type": "pong",
+  "version": "2.0",
+  "capabilities": ["polkit", "keyring", "pinentry", "fingerprint", "fido2"],
+  "provider": {
+    "id": "uuid",
+    "name": "MyShell",
+    "kind": "waybar-widget",
+    "priority": 10
+  },
+  "bootstrap": {
+    "timestamp": 1234567890,
+    "mode": "session",
+    "pinentry_path": "/usr/libexec/pinentry-bb"
+  }
+}
+```
+
+### Next Event (Polling)
+For providers that prefer polling over subscription:
+```json
+{"type": "next"}
+```
+
+If no events are pending, the daemon will hold the request until one arrives.
+
+## Priority System
+
+Multiple providers can connect simultaneously. The active provider is determined by:
+
+1. **Priority**: Highest `priority` value wins
+2. **Recency**: If tied, most recent heartbeat wins
+3. **Pruning**: Providers without heartbeat for 10+ seconds are removed
+
+When the active provider disconnects, the next highest priority provider becomes active automatically. If no providers are active, the fallback window launches.
+
+## Security Notes
+
+- Socket uses peer credential checking (SO_PEERCRED)
+- Only the active provider can submit responses
+- Password data is securely zeroed in memory
+- Each session has a unique cookie ID
+
+## Example Flow
+
+```
+1. Provider connects to socket
+2. Provider sends: {"type": "ui.register", "name": "MyBar", "priority": 10}
+3. Daemon responds: {"type": "ui.registered", "id": "...", "active": true}
+4. Provider sends: {"type": "subscribe"}
+5. User runs: pkexec echo "test"
+6. Daemon sends: {"type": "session.created", "id": "cookie1", ...}
+7. Daemon sends: {"type": "session.updated", "id": "cookie1", "prompt": "Password:"}
+8. Provider displays prompt UI
+9. User enters password
+10. Provider sends: {"type": "session.respond", "id": "cookie1", "response": "secret"}
+11. Daemon sends: {"type": "session.closed", "id": "cookie1", "result": "success"}
+12. Provider hides prompt UI
+```
+
+## Reference Implementations
+
+- **Noctalia Shell**: [bb-auth plugin](https://github.com/anthonyhab/noctalia-plugins/)
+
+## Version History
+
+- **2.0** (Current): Full provider contract with priority system
+- **1.0**: Basic subscription model
+
