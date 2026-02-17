@@ -16,13 +16,14 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gcr-4 json-glib
+          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gcr-4 json-glib gtk4
 
-      - name: Fix permissions
+      - name: Prepare build user
         run: |
-          chown -R nobody .
+          useradd -m builder
+          chown -R builder:builder .
 
       - name: Build
         run: |
           # makepkg cannot run as root
-          su nobody -s /bin/bash -c "makepkg -s --noconfirm"
+          su builder -s /bin/bash -c "makepkg -s --noconfirm"
