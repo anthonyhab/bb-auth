@@ -1,0 +1,28 @@
+name: Arch Linux Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gcr-4 json-glib
+
+      - name: Fix permissions
+        run: |
+          chown -R nobody .
+
+      - name: Build
+        run: |
+          # makepkg cannot run as root
+          su nobody -s /bin/bash -c "makepkg -s --noconfirm"
