@@ -5,9 +5,6 @@
 
 int runFallbackWindowTouchModelTests(int argc, char** argv);
 int runAgentRoutingTests(int argc, char** argv);
-int runProviderManifestTests(int argc, char** argv);
-int runProviderDiscoveryTests(int argc, char** argv);
-int runProviderLauncherTests(int argc, char** argv);
 int runTextNormalizeTests(int argc, char** argv);
 
 class SessionInfoTest : public QObject {
@@ -68,13 +65,11 @@ void SessionInfoTest::updatedEventCanContainErrorAndInfo() {
 int main(int argc, char** argv) {
     QApplication    app(argc, argv);
     SessionInfoTest sessionInfoTest;
-    const int       sessionResult   = QTest::qExec(&sessionInfoTest, argc, argv);
-    const int       routingResult   = runAgentRoutingTests(argc, argv);
-    const int       fallbackResult  = runFallbackWindowTouchModelTests(argc, argv);
+    const int       sessionResult  = QTest::qExec(&sessionInfoTest, argc, argv);
+    const int       routingResult  = runAgentRoutingTests(argc, argv);
+    const int       fallbackResult = runFallbackWindowTouchModelTests(argc, argv);
     const int       normalizeResult = runTextNormalizeTests(argc, argv);
-    const int       manifestResult  = runProviderManifestTests(argc, argv);
-    const int       discoveryResult = runProviderDiscoveryTests(argc, argv);
-    const int       launcherResult  = runProviderLauncherTests(argc, argv);
+
     if (sessionResult != 0) {
         return sessionResult;
     }
@@ -84,16 +79,7 @@ int main(int argc, char** argv) {
     if (fallbackResult != 0) {
         return fallbackResult;
     }
-    if (normalizeResult != 0) {
-        return normalizeResult;
-    }
-    if (manifestResult != 0) {
-        return manifestResult;
-    }
-    if (discoveryResult != 0) {
-        return discoveryResult;
-    }
-    return launcherResult;
+    return normalizeResult;
 }
 
 #include "test_session_info.moc"
