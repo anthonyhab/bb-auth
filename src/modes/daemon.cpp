@@ -13,7 +13,14 @@ namespace modes {
         std::print("Socket path: {}\n", socketPath.toStdString());
 
         g_pAgent = std::make_unique<CAgent>();
-        return g_pAgent->start(app, socketPath) ? 0 : 1;
+        if (!g_pAgent->start(app, socketPath)) {
+            // PolkitQt listener teardown can crash after failed register attempts.
+            // Leak the agent on this short-lived error path and exit cleanly.
+            (void)g_pAgent.release();
+            return 1;
+        }
+
+        return 0;
     }
 
 } // namespace modes

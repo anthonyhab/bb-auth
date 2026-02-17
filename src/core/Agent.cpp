@@ -124,16 +124,23 @@ CAgent::~CAgent() {}
 bool CAgent::start(QCoreApplication& app, const QString& socketPath) {
     m_socketPath = socketPath;
 
-    PolkitQt1::UnixSessionSubject subject(getpid());
-    if (!m_listener->registerListener(subject, "/org/kde/PolicyKit1/AuthenticationAgent")) {
-        std::print(stderr, "Failed to register as Polkit agent listener\n");
-        return false;
+    const bool skipPolkit = qEnvironmentVariableIsSet("BB_AUTH_SKIP_POLKIT");
+    if (!skipPolkit) {
+        PolkitQt1::UnixSessionSubject subject(getpid());
+        if (!m_listener->registerListener(subject, "/org/kde/PolicyKit1/AuthenticationAgent")) {
+            std::print(stderr, "Failed to register as Polkit agent listener\n");
+            return false;
+        }
+
+        std::print("Polkit listener registered successfully\n");
+    } else {
+        std::print("Skipping Polkit listener registration (BB_AUTH_SKIP_POLKIT=1)\n");
     }
 
-    std::print("Polkit listener registered successfully\n");
-
-    // Connect Polkit signals
-    connect(m_listener.data(), &CPolkitListener::completed, this, &CAgent::onPolkitCompleted);
+    if (!skipPolkit) {
+        // Connect Polkit signals
+        connect(m_listener.data(), &CPolkitListener::completed, this, &CAgent::onPolkitCompleted);
+    }
 
     // Setup IPC server
     m_ipcServer.setMessageHandler([this](QLocalSocket* socket, const QString& type, const QJsonObject& msg) { handleMessage(socket, type, msg); });
