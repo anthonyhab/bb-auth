@@ -8,6 +8,7 @@ url="https://github.com/anthonyhab/bb-auth"
 license=('BSD-3-Clause')
 depends=(
     'qt6-base'
+    'gtk4'
     'polkit-qt6'
     'polkit'
     'gcr-4'
