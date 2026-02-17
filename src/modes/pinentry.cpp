@@ -42,12 +42,17 @@ namespace {
         QString result;
         result.reserve(input.size() * 3);
 
+        static const char hexChars[] = "0123456789ABCDEF";
+
         for (const QChar& ch : input) {
             char c = ch.toLatin1();
             if (c == '%' || c == '\n' || c == '\r') {
-                result += QString("%%%1").arg(static_cast<unsigned char>(c), 2, 16, QChar('0')).toUpper();
+                result.append('%');
+                unsigned char uc = static_cast<unsigned char>(c);
+                result.append(hexChars[(uc >> 4) & 0xF]);
+                result.append(hexChars[uc & 0xF]);
             } else {
-                result += ch;
+                result.append(ch);
             }
         }
         return result;
