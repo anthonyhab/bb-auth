@@ -16,7 +16,7 @@ in {
   "bb-auth" = lib.composeManyExtensions [
     (final: prev: {
       "bb-auth" = final.callPackage ./. {
-        stdenv = final.gcc15Stdenv;
+        stdenv = final.stdenv;
         version = "${version}+date=${date}_${self.shortRev or "dirty"}";
       };
     })
