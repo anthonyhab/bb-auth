@@ -18,7 +18,7 @@ class CPolkitListener : public PolkitQt1::Agent::Listener {
     Q_DISABLE_COPY(CPolkitListener)
 
   public:
-    CPolkitListener(QObject* parent = nullptr);
+    explicit CPolkitListener(bb::CAgent* agent, QObject* parent = nullptr);
     ~CPolkitListener() override;
 
     void submitPassword(const QString& cookie, const QString& pass);
@@ -63,6 +63,8 @@ class CPolkitListener : public PolkitQt1::Agent::Listener {
     void                                             reattempt(SessionState* state);
     void                                             finishAuth(SessionState* state);
     SessionState*                                    findStateForSession(PolkitQt1::Agent::Session* session);
+
+    bb::CAgent*                                      m_agent;
 
     friend class bb::CAgent;
 };

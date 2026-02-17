@@ -80,13 +80,12 @@ namespace {
 
 } // namespace
 
-CAgent::CAgent(QObject* parent) : QObject(parent), m_listener(new CPolkitListener(this)), m_eventRouter(m_providerRegistry, m_eventQueue) {
+CAgent::CAgent(QObject* parent) : QObject(parent), m_listener(new CPolkitListener(this, this)), m_eventRouter(m_providerRegistry, m_eventQueue) {
 #ifdef BB_AUTH_PROVIDER_SYSTEM_DIR
     m_providerSearchDirs = bb::providers::ProviderDiscovery::defaultSearchDirs(QStringLiteral(BB_AUTH_PROVIDER_SYSTEM_DIR));
 #else
     m_providerSearchDirs = bb::providers::ProviderDiscovery::defaultSearchDirs();
 #endif
-
     m_messageRouter.registerHandler("ping", [this](QLocalSocket* socket, const QJsonObject&) {
         QJsonObject       pong{{"type", "pong"}, {"version", "2.0"}, {"capabilities", QJsonArray{"polkit", "keyring", "pinentry", "fingerprint", "fido2"}}};
 
