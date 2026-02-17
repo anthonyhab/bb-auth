@@ -1,4 +1,4 @@
-# Maintainer: Anthony Habibe <bb@hab.rip>
+# Maintainer: anthonyhab
 pkgname=bb-auth-git
 pkgver=r43.fc40397
 pkgrel=1
@@ -10,16 +10,20 @@ depends=(
     'qt6-base'
     'polkit-qt6'
     'polkit'
-    'gcr-4'
+    'gnome-keyring'
     'json-glib'
 )
 makedepends=(
     'git'
     'cmake'
 )
-provides=('bb-auth' 'bb-auth-git')
-conflicts=('bb-auth' 'noctalia-auth-git' 'noctalia-polkit-git' 'noctalia-unofficial-auth-agent')
-replaces=('noctalia-auth-git' 'noctalia-polkit-git')
+optdepends=(
+    'fprintd: Fingerprint authentication support'
+    'libfido2: FIDO2 device support'
+)
+provides=('bb-auth')
+conflicts=('bb-auth')
+replaces=('noctalia-auth-git' 'noctalia-polkit-git' 'noctalia-unofficial-auth-agent-git')
 source=("${pkgname}::git+https://github.com/anthonyhab/bb-auth.git")
 sha256sums=('SKIP')
 
@@ -34,6 +38,11 @@ build() {
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr
     cmake --build build
+}
+
+check() {
+    cd "$pkgname"
+    ctest --test-dir build --output-on-failure
 }
 
 package() {

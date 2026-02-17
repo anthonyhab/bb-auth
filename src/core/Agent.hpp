@@ -16,8 +16,6 @@
 #include "ipc/IpcServer.hpp"
 #include "managers/KeyringManager.hpp"
 #include "managers/PinentryManager.hpp"
-#include "providers/ProviderDiscovery.hpp"
-#include "providers/ProviderLauncher.hpp"
 
 namespace bb {
 
@@ -84,8 +82,6 @@ namespace bb {
         QList<QLocalSocket*>            m_subscribers;
         QTimer                          m_providerMaintenanceTimer;
         QString                         m_socketPath;
-        bb::providers::ProviderLauncher m_providerLauncher;
-        QStringList                     m_providerSearchDirs;
         qint64                          m_lastFallbackLaunchMs = 0;
     };
 
