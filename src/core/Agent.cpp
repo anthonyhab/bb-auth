@@ -452,12 +452,16 @@ void CAgent::onSessionInfo(const QString& cookie, const QString& info) {
 
 void CAgent::onPolkitCompleted([[maybe_unused]] bool gainedAuthorization) {}
 // Centralized session management
-void CAgent::createSession(const QString& id, Session::Source source, Session::Context ctx) {
-    const QJsonObject createdEvent = m_sessionStore.createSession(id, source, ctx);
-    emitSessionEvent(createdEvent);
+bool CAgent::createSession(const QString& id, Session::Source source, Session::Context ctx) {
+    const auto createdEvent = m_sessionStore.createSession(id, source, ctx);
+    if (!createdEvent) {
+        return false;
+    }
+    emitSessionEvent(*createdEvent);
     if (!hasActiveProvider()) {
         ensureFallbackUiRunning("session-created");
     }
+    return true;
 }
 void CAgent::updateSessionPrompt(const QString& id, const QString& prompt, bool echo, bool clearError) {
     const auto updated = m_sessionStore.updatePrompt(id, prompt, echo, clearError);

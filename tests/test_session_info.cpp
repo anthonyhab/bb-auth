@@ -9,6 +9,7 @@ int runProviderManifestTests(int argc, char** argv);
 int runProviderDiscoveryTests(int argc, char** argv);
 int runProviderLauncherTests(int argc, char** argv);
 int runTextNormalizeTests(int argc, char** argv);
+int runSessionStoreTests(int argc, char** argv);
 
 class SessionInfoTest : public QObject {
     Q_OBJECT
@@ -71,6 +72,7 @@ int main(int argc, char** argv) {
     const int       sessionResult   = QTest::qExec(&sessionInfoTest, argc, argv);
     const int       routingResult   = runAgentRoutingTests(argc, argv);
     const int       fallbackResult  = runFallbackWindowTouchModelTests(argc, argv);
+    const int       storeResult     = runSessionStoreTests(argc, argv);
     const int       normalizeResult = runTextNormalizeTests(argc, argv);
     const int       manifestResult  = runProviderManifestTests(argc, argv);
     const int       discoveryResult = runProviderDiscoveryTests(argc, argv);
@@ -83,6 +85,9 @@ int main(int argc, char** argv) {
     }
     if (fallbackResult != 0) {
         return fallbackResult;
+    }
+    if (storeResult != 0) {
+        return storeResult;
     }
     if (normalizeResult != 0) {
         return normalizeResult;

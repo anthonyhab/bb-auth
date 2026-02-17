@@ -198,6 +198,7 @@ qt_add_executable(bb-auth-tests
     tests/test_provider_discovery.cpp
     tests/test_provider_launcher.cpp
     tests/test_text_normalize.cpp
+    tests/test_session_store.cpp
 
     src/core/Session.cpp
     src/core/Session.hpp
@@ -207,6 +208,8 @@ qt_add_executable(bb-auth-tests
     src/core/agent/ProviderRegistry.hpp
     src/core/agent/EventRouter.cpp
     src/core/agent/EventRouter.hpp
+    src/core/agent/SessionStore.cpp
+    src/core/agent/SessionStore.hpp
     src/core/providers/ProviderManifest.cpp
     src/core/providers/ProviderManifest.hpp
     src/core/providers/ProviderDiscovery.cpp
