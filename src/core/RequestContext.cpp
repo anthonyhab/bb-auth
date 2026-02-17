@@ -18,6 +18,8 @@ QJsonObject ProcInfo::toJson() const {
         obj["ppid"] = ppid;
     if (uid >= 0)
         obj["uid"] = uid;
+    if (euid >= 0)
+        obj["euid"] = euid;
     if (!name.isEmpty())
         obj["name"] = name;
     if (!exe.isEmpty())
@@ -81,7 +83,11 @@ std::optional<ProcInfo> RequestContextHelper::readProc(qint64 pid) {
             } else if (line.startsWith("PPid:")) {
                 info.ppid = line.section(':', 1).trimmed().toLongLong();
             } else if (line.startsWith("Uid:")) {
-                info.uid = line.section(':', 1).simplified().split(' ').first().toLongLong();
+                QStringList parts = line.section(':', 1).simplified().split(' ');
+                if (parts.size() >= 1)
+                    info.uid = parts[0].toLongLong();
+                if (parts.size() >= 2)
+                    info.euid = parts[1].toLongLong();
             }
         }
     } else {
@@ -186,6 +192,10 @@ DesktopInfo RequestContextHelper::findDesktopForExe(const QString& exePath) {
 }
 
 ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subject, qint64 agentUid) {
+    return resolveRequestorFromSubject(subject, agentUid, [](qint64 pid) { return readProc(pid); });
+}
+
+ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subject, qint64 agentUid, std::function<std::optional<ProcInfo>(qint64)> procReader) {
     ActorInfo actor;
     actor.proc = subject;
 
@@ -195,7 +205,7 @@ ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subj
     int    hops    = 0;
 
     while (currPid > 1 && hops < 16) {
-        auto info = readProc(currPid);
+        auto info = procReader(currPid);
         if (!info) {
             qDebug() << "Requestor resolution: failed to read /proc for pid" << currPid;
             break;
@@ -203,7 +213,14 @@ ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subj
 
         qDebug() << "Requestor resolution: pid" << info->pid << "(name=" << info->name << ", ppid=" << info->ppid << ", uid=" << info->uid << ", exe=" << info->exe << ")";
 
-        bool isBridge = (info->name == "pkexec" || info->name == "sudo" || info->name == "doas");
+        QString exeName;
+        if (!info->exe.isEmpty()) {
+            exeName = QFileInfo(info->exe).fileName();
+        } else if (info->euid == 0) {
+            exeName = info->name;
+        }
+
+        bool isBridge = (exeName == "pkexec" || exeName == "sudo" || exeName == "doas");
 
         // Skip processes not owned by the user (agent) unless it's a known bridge like pkexec
         if (info->uid != agentUid && agentUid != 0 && !isBridge) {

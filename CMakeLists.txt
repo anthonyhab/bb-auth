@@ -193,9 +193,12 @@ qt_add_executable(bb-auth-tests
     tests/test_provider_manifest.cpp
     tests/test_provider_discovery.cpp
     tests/test_provider_launcher.cpp
+    tests/test_request_context.cpp
 
     src/core/Session.cpp
     src/core/Session.hpp
+    src/core/RequestContext.cpp
+    src/core/RequestContext.hpp
     src/core/agent/EventQueue.cpp
     src/core/agent/EventQueue.hpp
     src/core/agent/ProviderRegistry.cpp
@@ -226,6 +229,8 @@ target_link_libraries(bb-auth-tests
         Qt6::Core
         Qt6::Widgets
         Qt6::Network
+        Qt6::DBus
+        PkgConfig::polkit_deps
 )
 
 add_test(NAME bb-auth-tests COMMAND bb-auth-tests)
