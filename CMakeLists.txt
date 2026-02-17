@@ -235,23 +235,15 @@ install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-bootstrap
 
 # Install symlinks for protocol compatibility
 install(CODE "
-    if(\"${CMAKE_INSTALL_LIBEXECDIR}\" MATCHES \"^/\")
-        set(_bb_auth_libexec_dir \"\$ENV{DESTDIR}${CMAKE_INSTALL_LIBEXECDIR}\")
-    else()
-        set(_bb_auth_libexec_dir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}\")
-    endif()
-
     execute_process(
-        COMMAND \${CMAKE_COMMAND} -E create_symlink
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
             bb-auth
-            bb-keyring-prompter
-        WORKING_DIRECTORY \"\${_bb_auth_libexec_dir}\"
+            \$ENV{DESTDIR}${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-keyring-prompter
     )
     execute_process(
-        COMMAND \${CMAKE_COMMAND} -E create_symlink
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
             bb-auth
-            pinentry-bb
-        WORKING_DIRECTORY \"\${_bb_auth_libexec_dir}\"
+            \$ENV{DESTDIR}${CMAKE_INSTALL_FULL_LIBEXECDIR}/pinentry-bb
     )
 ")
 

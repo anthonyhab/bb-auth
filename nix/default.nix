@@ -40,6 +40,7 @@ in
       gcr_4
       glib
       json-glib
+      gtk4
     ];
 
     meta = {
