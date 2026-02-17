@@ -4,6 +4,7 @@
 
 #include <QDebug>
 #include <QList>
+#include <QJsonDocument>
 #include <QRegularExpression>
 #include <QUuid>
 
@@ -100,7 +101,22 @@ void PinentryManager::handleRequest(const QJsonObject& msg, QLocalSocket* socket
         ctx.requestor.fallbackKey = actor.fallbackKey;
         ctx.requestor.pid = peerPid;
 
-        g_pAgent->createSession(cookie, Session::Source::Pinentry, ctx);
+        if (!g_pAgent->createSession(cookie, Session::Source::Pinentry, ctx)) {
+            // Should not happen as we checked !sessionExists earlier, but for safety:
+            qWarning() << "Failed to create pinentry session (collision?):" << cookie;
+            m_pendingRequests.remove(cookie);
+            m_flowOwners.remove(cookie);
+            if (!request.keyinfo.isEmpty()) {
+                m_flowKeyinfos.remove(cookie);
+            }
+            QJsonObject error{{"type", "error"}, {"message", "Session ID collision"}};
+            QJsonDocument doc(error);
+            if (socket && socket->isOpen()) {
+                socket->write(doc.toJson(QJsonDocument::Compact) + "\n");
+                socket->flush();
+            }
+            return;
+        }
     } else {
         g_pAgent->updateSessionPinentryRetry(cookie, curRetry, maxRetries);
     }

@@ -63,7 +63,7 @@ namespace bb {
 
         void        emitSessionEvent(const QJsonObject& event);
 
-        void        createSession(const QString& id, Session::Source source, Session::Context ctx);
+        bool        createSession(const QString& id, Session::Source source, Session::Context ctx);
         void        updateSessionPrompt(const QString& id, const QString& prompt, bool echo = false, bool clearError = true);
         void        updateSessionError(const QString& id, const QString& error);
         void        updateSessionPinentryRetry(const QString& id, int curRetry, int maxRetries);

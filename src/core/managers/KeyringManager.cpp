@@ -48,7 +48,17 @@ namespace bb {
         ctx.requestor.pid = peerPid;
 
         // Use centralized session management
-        g_pAgent->createSession(cookie, bb::Session::Source::Keyring, ctx);
+        if (!g_pAgent->createSession(cookie, bb::Session::Source::Keyring, ctx)) {
+            m_pendingRequests.remove(cookie);
+
+            QJsonObject error{{"type", "error"}, {"message", "Session ID collision"}};
+            QJsonDocument doc(error);
+            if (socket && socket->isOpen()) {
+                socket->write(doc.toJson(QJsonDocument::Compact) + "\n");
+                socket->flush();
+            }
+            return;
+        }
         g_pAgent->updateSessionPrompt(cookie, request.message, false);
     }
 

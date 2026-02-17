@@ -12,7 +12,7 @@ namespace bb::agent {
       public:
         using SessionMap = std::unordered_map<QString, std::unique_ptr<bb::Session>>;
 
-        QJsonObject                createSession(const QString& id, Session::Source source, Session::Context ctx);
+        std::optional<QJsonObject> createSession(const QString& id, Session::Source source, Session::Context ctx);
         std::optional<QJsonObject> updatePrompt(const QString& id, const QString& prompt, bool echo, bool clearError);
         std::optional<QJsonObject> updateError(const QString& id, const QString& error);
         std::optional<QJsonObject> updateInfo(const QString& id, const QString& info);

@@ -2,7 +2,11 @@
 
 namespace bb::agent {
 
-    QJsonObject SessionStore::createSession(const QString& id, Session::Source source, Session::Context ctx) {
+    std::optional<QJsonObject> SessionStore::createSession(const QString& id, Session::Source source, Session::Context ctx) {
+        if (m_sessions.find(id) != m_sessions.end()) {
+            return std::nullopt;
+        }
+
         auto session      = std::make_unique<bb::Session>(id, source, ctx);
         auto createdEvent = session->toCreatedEvent();
         m_sessions[id]    = std::move(session);
