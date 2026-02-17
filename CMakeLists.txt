@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network DBus Widgets Test)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network DBus Widgets Test)
 find_package(PkgConfig REQUIRED)
 
 if(NOT MSVC)
@@ -47,7 +47,7 @@ pkg_check_modules(
   gio-2.0
   json-glib-1.0)
 
-qt_standard_project_setup(REQUIRES 6.5)
+qt_standard_project_setup(REQUIRES 6.4)
 enable_testing()
 
 # Unified bb-auth binary
@@ -193,9 +193,12 @@ qt_add_executable(bb-auth-tests
     tests/test_provider_manifest.cpp
     tests/test_provider_discovery.cpp
     tests/test_provider_launcher.cpp
+    tests/test_classify_request.cpp
 
     src/core/Session.cpp
     src/core/Session.hpp
+    src/core/RequestContext.cpp
+    src/core/RequestContext.hpp
     src/core/agent/EventQueue.cpp
     src/core/agent/EventQueue.hpp
     src/core/agent/ProviderRegistry.cpp
@@ -226,6 +229,8 @@ target_link_libraries(bb-auth-tests
         Qt6::Core
         Qt6::Widgets
         Qt6::Network
+        Qt6::DBus
+        PkgConfig::polkit_deps
 )
 
 add_test(NAME bb-auth-tests COMMAND bb-auth-tests)
