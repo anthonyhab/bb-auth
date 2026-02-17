@@ -8,6 +8,7 @@
   qt6,
   gcr_4,
   glib,
+  gtk4,
   json-glib,
   version ? "0",
 }: let
@@ -39,6 +40,7 @@ in
       # For keyring-prompter
       gcr_4
       glib
+      gtk4
       json-glib
     ];
 

@@ -81,11 +81,6 @@ namespace {
 } // namespace
 
 CAgent::CAgent(QObject* parent) : QObject(parent), m_listener(new CPolkitListener(this, this)), m_eventRouter(m_providerRegistry, m_eventQueue) {
-#ifdef BB_AUTH_PROVIDER_SYSTEM_DIR
-    m_providerSearchDirs = bb::providers::ProviderDiscovery::defaultSearchDirs(QStringLiteral(BB_AUTH_PROVIDER_SYSTEM_DIR));
-#else
-    m_providerSearchDirs = bb::providers::ProviderDiscovery::defaultSearchDirs();
-#endif
     m_messageRouter.registerHandler("ping", [this](QLocalSocket* socket, const QJsonObject&) {
         QJsonObject       pong{{"type", "pong"}, {"version", "2.0"}, {"capabilities", QJsonArray{"polkit", "keyring", "pinentry", "fingerprint", "fido2"}}};
 
@@ -551,42 +546,40 @@ void CAgent::ensureFallbackUiRunning(const QString& reason) {
         return;
     }
 
+    {
+        QProcess probe;
+        probe.start("pgrep", QStringList{"-u", QString::number(getuid()), "-f", "bb-auth-fallback"});
+        if (probe.waitForFinished(500) && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0) {
+            return;
+        }
+    }
+
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     if ((nowMs - m_lastFallbackLaunchMs) < FALLBACK_LAUNCH_COOLDOWN_MS) {
         return;
     }
 
-    const auto discovery = bb::providers::ProviderDiscovery::discover(m_providerSearchDirs);
-    for (const auto& warning : discovery.warnings) {
-        qWarning() << warning;
+    QString fallbackPath = QString::fromLocal8Bit(qgetenv("BB_AUTH_FALLBACK_PATH"));
+    if (fallbackPath.isEmpty()) {
+        fallbackPath = QCoreApplication::applicationDirPath() + "/bb-auth-fallback";
     }
 
-    if (!discovery.manifests.isEmpty()) {
-        QStringList ids;
-        ids.reserve(discovery.manifests.size());
-        for (const auto& manifest : discovery.manifests) {
-            ids.push_back(manifest.id);
-        }
-        qInfo() << "Discovered provider manifests:" << ids;
+    const QFileInfo info(fallbackPath);
+    if (!info.exists() || !info.isExecutable()) {
+        qWarning() << "Fallback UI binary missing or not executable:" << fallbackPath;
+        return;
     }
 
-    const QString legacyOverride    = QString::fromLocal8Bit(qgetenv("BB_AUTH_FALLBACK_PATH"));
-    const QString legacyDefaultPath = QCoreApplication::applicationDirPath() + "/bb-auth-fallback";
+    QStringList args;
+    if (!m_socketPath.isEmpty()) {
+        args << "--socket" << m_socketPath;
+    }
 
-    const auto    launch = m_providerLauncher.tryLaunch(discovery.manifests, m_socketPath, reason, hasActiveProvider(), !m_sessionStore.empty(), legacyOverride, legacyDefaultPath);
-
-    if (launch.launched) {
+    const bool launched = QProcess::startDetached(fallbackPath, args);
+    if (launched) {
         m_lastFallbackLaunchMs = nowMs;
-        qInfo() << "Provider launch:" << launch.detail << "id=" << launch.providerId << "exec=" << launch.executable;
-        return;
-    }
-
-    if (launch.attempted) {
-        qWarning() << "Provider launch failed:" << launch.detail << "id=" << launch.providerId << "exec=" << launch.executable;
-        return;
-    }
-
-    if (!launch.detail.isEmpty()) {
-        qInfo() << "Provider launch skipped:" << launch.detail;
+        qInfo() << "Launched fallback UI due to" << reason;
+    } else {
+        qWarning() << "Failed to launch fallback UI:" << fallbackPath;
     }
 }
