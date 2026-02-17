@@ -62,20 +62,27 @@ static void app_shutdown(GApplication* app, gpointer user_data) {
 int main(int argc, char** argv) {
     g_autofree char* runtime_dir    = g_strdup(g_getenv("XDG_RUNTIME_DIR"));
     g_autofree char* default_socket = NULL;
+    char*            filtered_argv[argc + 1];
+    int              filtered_argc = 1;
 
     if (runtime_dir != NULL) {
         default_socket = g_build_filename(runtime_dir, "bb-auth.sock", NULL);
     }
 
     g_autofree char* socket_path = g_strdup(default_socket != NULL ? default_socket : "");
+    filtered_argv[0]             = argv[0];
 
     for (int i = 1; i < argc; ++i) {
         if (g_strcmp0(argv[i], "--socket") == 0 && (i + 1) < argc) {
             g_free(socket_path);
             socket_path = g_strdup(argv[i + 1]);
             i++;
+            continue;
         }
+
+        filtered_argv[filtered_argc++] = argv[i];
     }
+    filtered_argv[filtered_argc] = NULL;
 
     if (socket_path == NULL || socket_path[0] == '\0') {
         return 1;
@@ -89,5 +96,5 @@ int main(int argc, char** argv) {
     g_signal_connect(app, "activate", G_CALLBACK(app_activate), &state);
     g_signal_connect(app, "shutdown", G_CALLBACK(app_shutdown), &state);
 
-    return g_application_run(G_APPLICATION(app), argc, argv);
+    return g_application_run(G_APPLICATION(app), filtered_argc, filtered_argv);
 }
