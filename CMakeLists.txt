@@ -197,6 +197,7 @@ qt_add_executable(bb-auth-tests
     tests/test_provider_manifest.cpp
     tests/test_provider_discovery.cpp
     tests/test_provider_launcher.cpp
+    tests/test_text_normalize.cpp
 
     src/core/Session.cpp
     src/core/Session.hpp
