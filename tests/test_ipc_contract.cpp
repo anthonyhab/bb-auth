@@ -4,7 +4,10 @@
 
 #include <QtTest/QtTest>
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalServer>
@@ -71,17 +74,26 @@ namespace bb {
             }
 
             QJsonObject readJsonLine(int timeoutMs = 1000) {
-                QByteArray line;
+                QByteArray   line;
+                QElapsedTimer timer;
+                timer.start();
 
-                while (!line.contains('\n')) {
-                    if (!m_client.waitForReadyRead(timeoutMs)) {
-                        return QJsonObject{};
-                    }
+                while (timer.elapsed() < timeoutMs) {
                     line.append(m_client.readAll());
+                    if (line.contains('\n')) {
+                        break;
+                    }
+
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+                    m_client.waitForReadyRead(20);
+                }
+
+                if (!line.contains('\n')) {
+                    return QJsonObject{};
                 }
 
                 const qsizetype newline = line.indexOf('\n');
-                const auto      json    = QJsonDocument::fromJson(line.left(newline));
+                const auto      json    = QJsonDocument::fromJson(line.left(newline).trimmed());
                 return json.isObject() ? json.object() : QJsonObject{};
             }
 
@@ -115,6 +127,7 @@ namespace bb {
         QVERIFY(socket.waitForBytesWritten(1000));
 
         const auto reply = fixture.readJsonLine();
+        QVERIFY(!reply.isEmpty());
         QCOMPARE(reply.value("type").toString(), QString("error"));
         QCOMPARE(reply.value("message").toString(), QString("Invalid JSON"));
     }
@@ -128,6 +141,7 @@ namespace bb {
         QVERIFY(socket.waitForBytesWritten(1000));
 
         const auto reply = fixture.readJsonLine();
+        QVERIFY(!reply.isEmpty());
         QCOMPARE(reply.value("type").toString(), QString("error"));
         QCOMPARE(reply.value("message").toString(), QString("Missing type field"));
     }
@@ -141,6 +155,7 @@ namespace bb {
         QVERIFY(socket.waitForBytesWritten(1000));
 
         const auto reply = fixture.readJsonLine();
+        QVERIFY(!reply.isEmpty());
         QCOMPARE(reply.value("type").toString(), QString("error"));
         QCOMPARE(reply.value("message").toString(), QString("Unknown type"));
     }
