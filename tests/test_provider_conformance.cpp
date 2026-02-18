@@ -120,6 +120,9 @@ namespace bb {
       private slots:
         void defaultSearchDirs_respectsContractOrder();
         void providerRegistry_assignsExpectedDefaultsAndPriorities();
+        void providerRegistry_rejectsHeartbeatForUnregisteredSocket();
+        void providerRegistry_breaksPriorityTiesByLatestHeartbeat();
+        void providerRegistry_prunesStaleProvidersAfterHeartbeatTimeout();
         void providerRegistry_enforcesActiveProviderAuthorizationBoundary();
         void discovery_honorsDefaultDirectoryPrecedence();
     };
@@ -176,6 +179,68 @@ namespace bb {
         QCOMPARE(unnamedProvider.name, QString("unknown"));
         QCOMPARE(unnamedProvider.kind, QString("unknown"));
         QCOMPARE(unnamedProvider.priority, 50);
+    }
+
+    void ProviderConformanceTest::providerRegistry_rejectsHeartbeatForUnregisteredSocket() {
+        qint64                  nowMs = 1000;
+        agent::ProviderRegistry registry([&nowMs] { return nowMs; });
+
+        QLocalSocket            unknownSocket;
+        QVERIFY(!registry.heartbeat(&unknownSocket));
+    }
+
+    void ProviderConformanceTest::providerRegistry_breaksPriorityTiesByLatestHeartbeat() {
+        LocalSocketFixture fixture;
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
+
+        qint64                  nowMs = 1000;
+        agent::ProviderRegistry registry([&nowMs] { return nowMs; });
+
+        ConnectedSocket         firstSocket = fixture.connect();
+        QVERIFY(firstSocket.server != nullptr);
+        ConnectedSocket secondSocket = fixture.connect();
+        QVERIFY(secondSocket.server != nullptr);
+
+        nowMs = 1000;
+        registry.registerProvider(firstSocket.server.get(), QJsonObject{{"name", "First"}, {"kind", "custom"}, {"priority", 42}});
+        nowMs = 2000;
+        registry.registerProvider(secondSocket.server.get(), QJsonObject{{"name", "Second"}, {"kind", "custom"}, {"priority", 42}});
+
+        nowMs = 2500;
+        QVERIFY(registry.recomputeActiveProvider());
+        QCOMPARE(registry.activeProvider(), secondSocket.server.get());
+
+        nowMs = 3000;
+        QVERIFY(registry.heartbeat(firstSocket.server.get()));
+
+        nowMs = 3500;
+        QVERIFY(registry.recomputeActiveProvider());
+        QCOMPARE(registry.activeProvider(), firstSocket.server.get());
+    }
+
+    void ProviderConformanceTest::providerRegistry_prunesStaleProvidersAfterHeartbeatTimeout() {
+        LocalSocketFixture fixture;
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
+
+        qint64                  nowMs = 1000;
+        agent::ProviderRegistry registry([&nowMs] { return nowMs; });
+
+        ConnectedSocket         socket = fixture.connect();
+        QVERIFY(socket.server != nullptr);
+
+        nowMs = 1000;
+        registry.registerProvider(socket.server.get(), QJsonObject{{"name", "Only"}, {"kind", "custom"}, {"priority", 10}});
+
+        nowMs = 2000;
+        QVERIFY(registry.recomputeActiveProvider());
+        QCOMPARE(registry.activeProvider(), socket.server.get());
+        QVERIFY(registry.hasActiveProvider());
+
+        // Provider heartbeat timeout is 15000ms. A provider older than that is pruned.
+        nowMs = 17001;
+        QVERIFY(registry.recomputeActiveProvider());
+        QVERIFY(!registry.hasActiveProvider());
+        QCOMPARE(registry.activeProvider(), nullptr);
     }
 
     void ProviderConformanceTest::providerRegistry_enforcesActiveProviderAuthorizationBoundary() {

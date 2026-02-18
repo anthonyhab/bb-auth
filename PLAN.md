@@ -72,7 +72,7 @@ Goal: make third-party provider integration safe and easy.
 
 Tasks:
 
-- [ ] Version and freeze provider protocol contract (`docs/PROVIDER_CONTRACT.md`).
+- [ ] Version and freeze provider protocol contract (`docs/PROVIDER_CONTRACT.md`) (lock-candidate draft complete; awaiting final review).
 - [x] Add provider conformance test harness (initial coverage for discovery, registration, priority, and authorization boundaries).
 - [x] Add a minimal external-provider template (single binary + manifest).
 - [x] Add provider packaging guide for Arch/Nix/manual installs.
@@ -186,3 +186,4 @@ Do not:
 - 2026-02-18: Added provider conformance test suite and external provider packaging guide.
 - 2026-02-18: Added external provider template and Arch CI split for core-only plus drop-in provider template validation.
 - 2026-02-18: Removed remaining in-tree GTK provider source/assets from core repository.
+- 2026-02-18: Reworked provider contract into lock-candidate spec and expanded conformance coverage for heartbeat/tie-break/stale-prune behavior.
