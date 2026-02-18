@@ -8,6 +8,7 @@ int runAgentRoutingTests(int argc, char** argv);
 int runProviderManifestTests(int argc, char** argv);
 int runProviderDiscoveryTests(int argc, char** argv);
 int runProviderLauncherTests(int argc, char** argv);
+int runProviderConformanceTests(int argc, char** argv);
 int runTextNormalizeTests(int argc, char** argv);
 int runSessionStoreTests(int argc, char** argv);
 int runClassifyRequestTests(int argc, char** argv);
@@ -83,6 +84,7 @@ int main(int argc, char** argv) {
     const int       manifestResult       = runProviderManifestTests(argc, argv);
     const int       discoveryResult      = runProviderDiscoveryTests(argc, argv);
     const int       launcherResult       = runProviderLauncherTests(argc, argv);
+    const int       conformanceResult    = runProviderConformanceTests(argc, argv);
     if (sessionResult != 0) {
         return sessionResult;
     }
@@ -113,7 +115,10 @@ int main(int argc, char** argv) {
     if (discoveryResult != 0) {
         return discoveryResult;
     }
-    return launcherResult;
+    if (launcherResult != 0) {
+        return launcherResult;
+    }
+    return conformanceResult;
 }
 
 #include "test_session_info.moc"

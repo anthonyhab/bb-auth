@@ -249,7 +249,7 @@ For local installs: `~/.local/libexec/bb-auth-migrate`
 ./build-dev.sh doctor
 ```
 
-See [docs/PINENTRY_FLOW.md](docs/PINENTRY_FLOW.md) for pinentry flow details and [docs/PROVIDER_CONTRACT.md](docs/PROVIDER_CONTRACT.md) for provider IPC contract.
+See [docs/PINENTRY_FLOW.md](docs/PINENTRY_FLOW.md) for pinentry flow details, [docs/PROVIDER_CONTRACT.md](docs/PROVIDER_CONTRACT.md) for provider IPC contract, and [docs/PROVIDER_PACKAGING.md](docs/PROVIDER_PACKAGING.md) for shipping external providers.
 
 ---
 

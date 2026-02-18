@@ -206,4 +206,5 @@ Providers must treat this as an authorization boundary, not a transient warning.
 
 - The in-tree Qt fallback (`src/fallback/*`) is a reference provider implementation.
 - Additional providers are expected to live out-of-tree and integrate via `providers.d` manifests.
+- Contract-level conformance checks live in `tests/test_provider_conformance.cpp`.
 - Future protocol revisions must update this document and preserve compatibility guarantees for v2 providers where possible.
