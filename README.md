@@ -38,11 +38,8 @@ Linux desktop authentication that stays out of your way.
 yay -S bb-auth-git
 ```
 
-`bb-auth-git` defaults to `-DBB_AUTH_GTK_FALLBACK=OFF` for deterministic minimal builds.
-To include GTK fallback in the package build:
-```bash
-BB_AUTH_GTK_FALLBACK=ON makepkg -si
-```
+`bb-auth-git` installs the minimal core daemon plus the built-in Qt fallback provider.
+Optional desktop-specific providers are installed separately as drop-ins.
 
 **Nix**:
 ```bash
@@ -174,19 +171,6 @@ Environment=BB_AUTH_CONFLICT_MODE=warn
 Environment=BB_AUTH_PROVIDER_DIR=%h/.config/bb-auth/providers.d
 ```
 
-### GTK fallback build mode
-
-Use CMake option `BB_AUTH_GTK_FALLBACK`:
-
-- `AUTO` (default): build GTK fallback only if `gtk4` is found.
-- `ON`: require and build GTK fallback (configure fails if missing).
-- `OFF`: never build GTK fallback.
-
-AUR builds can override with:
-```bash
-BB_AUTH_GTK_FALLBACK=OFF makepkg -si
-```
-
 ### Drop-in providers (`providers.d`)
 
 Provider executables are discovered through manifest files and launched automatically when needed.
@@ -204,11 +188,11 @@ Manifest requirements:
 
 ```json
 {
-  "id": "gtk-fallback",
-  "name": "GTK Fallback Provider",
-  "kind": "gtk-fallback",
-  "priority": 8,
-  "exec": "bb-auth-gtk-fallback",
+  "id": "my-provider",
+  "name": "My Provider",
+  "kind": "custom",
+  "priority": 20,
+  "exec": "my-provider",
   "autostart": true
 }
 ```

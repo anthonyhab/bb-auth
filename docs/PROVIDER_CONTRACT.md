@@ -39,7 +39,7 @@ A conforming provider must:
 ### Register provider
 
 ```json
-{"type":"ui.register","name":"my-provider","kind":"gtk-fallback","priority":10}
+{"type":"ui.register","name":"my-provider","kind":"custom","priority":10}
 ```
 
 Fields:
@@ -205,5 +205,5 @@ Providers must treat this as an authorization boundary, not a transient warning.
 ## Conformance notes
 
 - The in-tree Qt fallback (`src/fallback/*`) is a reference provider implementation.
-- The in-tree GTK fallback example (`src/providers/gtk-fallback/*`) is an additional reference provider.
+- Additional providers are expected to live out-of-tree and integrate via `providers.d` manifests.
 - Future protocol revisions must update this document and preserve compatibility guarantees for v2 providers where possible.

@@ -14,16 +14,6 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network DBus Widgets Test)
 find_package(PkgConfig REQUIRED)
 
-set(BB_AUTH_GTK_FALLBACK "AUTO" CACHE STRING "Build GTK fallback provider (AUTO, ON, OFF)")
-set_property(CACHE BB_AUTH_GTK_FALLBACK PROPERTY STRINGS AUTO ON OFF)
-string(TOUPPER "${BB_AUTH_GTK_FALLBACK}" BB_AUTH_GTK_FALLBACK_MODE)
-
-if(NOT BB_AUTH_GTK_FALLBACK_MODE STREQUAL "AUTO"
-   AND NOT BB_AUTH_GTK_FALLBACK_MODE STREQUAL "ON"
-   AND NOT BB_AUTH_GTK_FALLBACK_MODE STREQUAL "OFF")
-    message(FATAL_ERROR "Invalid BB_AUTH_GTK_FALLBACK='${BB_AUTH_GTK_FALLBACK}'. Expected AUTO, ON, or OFF.")
-endif()
-
 if(NOT MSVC)
     add_compile_options(-Wall -Wextra -Werror=format-security)
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -48,35 +38,6 @@ pkg_check_modules(
   gcr-4
   gio-2.0
   json-glib-1.0)
-
-set(BB_AUTH_BUILD_GTK_FALLBACK OFF)
-if(BB_AUTH_GTK_FALLBACK_MODE STREQUAL "ON")
-    pkg_check_modules(
-      gtk_fallback_deps
-      REQUIRED
-      IMPORTED_TARGET
-      gtk4
-      gio-2.0
-      json-glib-1.0)
-    set(BB_AUTH_BUILD_GTK_FALLBACK ON)
-elseif(BB_AUTH_GTK_FALLBACK_MODE STREQUAL "AUTO")
-    pkg_check_modules(
-      gtk_fallback_deps
-      QUIET
-      IMPORTED_TARGET
-      gtk4
-      gio-2.0
-      json-glib-1.0)
-
-    if(gtk_fallback_deps_FOUND)
-        set(BB_AUTH_BUILD_GTK_FALLBACK ON)
-        message(STATUS "GTK fallback provider enabled (AUTO)")
-    else()
-        message(STATUS "GTK fallback provider disabled (AUTO): missing gtk4/gio-2.0/json-glib-1.0")
-    endif()
-else()
-    message(STATUS "GTK fallback provider disabled (BB_AUTH_GTK_FALLBACK=OFF)")
-endif()
 
 qt_standard_project_setup(REQUIRES 6.4)
 enable_testing()
@@ -202,26 +163,6 @@ target_link_libraries(bb-auth-fallback
 
 install(TARGETS bb-auth-fallback
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
-
-if(BB_AUTH_BUILD_GTK_FALLBACK)
-    add_executable(bb-auth-gtk-fallback
-        src/providers/gtk-fallback/main.c
-        src/providers/gtk-fallback/GtkFallbackClient.c
-        src/providers/gtk-fallback/GtkFallbackClient.h
-        src/providers/gtk-fallback/GtkFallbackWindow.c
-        src/providers/gtk-fallback/GtkFallbackWindow.h
-    )
-
-    target_link_libraries(bb-auth-gtk-fallback
-        PRIVATE
-            PkgConfig::gtk_fallback_deps)
-
-    install(TARGETS bb-auth-gtk-fallback
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
-
-    install(FILES assets/providers.d/gtk-fallback.json
-            DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth/providers.d)
-endif()
 
 qt_add_executable(bb-auth-tests
     tests/test_session_info.cpp

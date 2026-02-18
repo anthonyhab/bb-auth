@@ -13,9 +13,6 @@ depends=(
     'gcr-4'
     'json-glib'
 )
-optdepends=(
-    'gtk4: optional runtime dep for bb-auth-gtk-fallback when package is built with BB_AUTH_GTK_FALLBACK=ON'
-)
 makedepends=(
     'git'
     'cmake'
@@ -33,11 +30,9 @@ pkgver() {
 
 build() {
     cd "$pkgname"
-    local gtk_fallback_mode="${BB_AUTH_GTK_FALLBACK:-OFF}"
     cmake -S . -B build \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-        -DBB_AUTH_GTK_FALLBACK="$gtk_fallback_mode"
+        -DCMAKE_INSTALL_PREFIX=/usr
     cmake --build build
 }
 

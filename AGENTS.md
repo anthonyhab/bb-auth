@@ -51,7 +51,7 @@ ctest --test-dir build-check --output-on-failure
 If packaging/build options changed, also test:
 
 ```bash
-cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Release -DBB_AUTH_GTK_FALLBACK=OFF
+cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Release
 cmake --build build-core -j"$(nproc)"
 ctest --test-dir build-core --output-on-failure
 ```

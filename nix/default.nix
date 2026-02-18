@@ -6,7 +6,6 @@
   kdePackages,
   polkit,
   qt6,
-  gtk4,
   gcr_4,
   glib,
   json-glib,
@@ -37,7 +36,6 @@ in
       polkit
       kdePackages.polkit-qt-1
       qt6.qtbase
-      gtk4
       # For keyring-prompter
       gcr_4
       glib

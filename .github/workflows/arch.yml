@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gcr-4 json-glib gtk4
+          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gcr-4 json-glib
 
       - name: Prepare build user
         run: |

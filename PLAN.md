@@ -49,17 +49,17 @@ Out-of-core responsibilities:
 
 ## Phase Roadmap
 
-## Phase 1: Modular Foundation (current)
+## Phase 1: Modular Foundation (completed)
 
 Goal: make "minimal core + drop-in providers" the enforced default.
 
 Tasks:
 
-- [ ] Remove in-tree GTK provider build/install from `CMakeLists.txt`.
-- [ ] Keep provider manifest/launcher runtime behavior unchanged.
-- [ ] Update `README.md` to document external-provider model first.
-- [ ] Keep `PKGBUILD` deterministic-minimal by default.
-- [ ] Ensure CI passes with no GTK provider in core build.
+- [x] Remove in-tree GTK provider build/install from `CMakeLists.txt`.
+- [x] Keep provider manifest/launcher runtime behavior unchanged.
+- [x] Update `README.md` to document external-provider model first.
+- [x] Keep `PKGBUILD` deterministic-minimal by default.
+- [x] Ensure CI passes with no GTK provider in core build.
 
 Exit criteria:
 
@@ -182,3 +182,4 @@ Do not:
 ## Changelog Notes
 
 - 2026-02-18: AUR packaging switched to deterministic minimal default (`BB_AUTH_GTK_FALLBACK=OFF`), with optional GTK fallback build via explicit opt-in.
+- 2026-02-18: Removed in-tree GTK provider build/install from core; core packaging/CI now validates minimal Qt-first architecture.
