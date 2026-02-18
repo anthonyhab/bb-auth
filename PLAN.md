@@ -74,9 +74,9 @@ Tasks:
 
 - [ ] Version and freeze provider protocol contract (`docs/PROVIDER_CONTRACT.md`).
 - [x] Add provider conformance test harness (initial coverage for discovery, registration, priority, and authorization boundaries).
-- [ ] Add a minimal external-provider template (single binary + manifest).
+- [x] Add a minimal external-provider template (single binary + manifest).
 - [x] Add provider packaging guide for Arch/Nix/manual installs.
-- [ ] Validate precedence and conflict behavior across provider dirs.
+- [x] Validate precedence and conflict behavior across provider dirs.
 
 Exit criteria:
 
@@ -160,8 +160,8 @@ Packaging:
 - [ ] Refactor out in-tree GTK provider code into external reference package/repo.
 - [x] Add `docs/PROVIDER_PACKAGING.md`.
 - [x] Add test target for provider conformance.
-- [ ] Add CI job that validates "core-only" installation path.
-- [ ] Add CI job that validates "core + optional provider" path.
+- [x] Add CI job that validates "core-only" installation path.
+- [x] Add CI job that validates "core + optional provider" path.
 
 ## Session Workflow (for future contributors/agents)
 
@@ -184,3 +184,4 @@ Do not:
 - 2026-02-18: AUR packaging switched to deterministic minimal default (`BB_AUTH_GTK_FALLBACK=OFF`), with optional GTK fallback build via explicit opt-in.
 - 2026-02-18: Removed in-tree GTK provider build/install from core; core packaging/CI now validates minimal Qt-first architecture.
 - 2026-02-18: Added provider conformance test suite and external provider packaging guide.
+- 2026-02-18: Added external provider template and Arch CI split for core-only plus drop-in provider template validation.

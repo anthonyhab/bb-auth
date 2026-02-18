@@ -15,6 +15,10 @@ Each provider package should install:
 1. Provider executable (any language/runtime).
 2. Provider manifest (`*.json`) under a `providers.d` directory.
 
+Starter template:
+
+- `examples/provider-template/`
+
 ## Runtime Locations
 
 `bb-auth` discovers manifests in this order:

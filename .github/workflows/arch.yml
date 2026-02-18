@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  build:
+  core-only:
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
@@ -27,3 +27,42 @@ jobs:
         run: |
           # makepkg cannot run as root
           su builder -s /bin/bash -c "makepkg -s --noconfirm"
+
+  core-plus-provider:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gcr-4 json-glib python
+
+      - name: Build and test core
+        run: |
+          cmake -S . -B build-ci -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-ci -j"$(nproc)"
+          ctest --test-dir build-ci --output-on-failure
+
+      - name: Validate external provider template
+        run: |
+          set -euo pipefail
+          python -m py_compile examples/provider-template/provider.py
+          python examples/provider-template/provider.py --help >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("examples/provider-template/provider.json").read_text(encoding="utf-8"))
+          required = {"id", "name", "kind", "priority", "exec", "autostart"}
+          missing = required - manifest.keys()
+          if missing:
+              raise SystemExit(f"missing manifest keys: {sorted(missing)}")
+          if not isinstance(manifest["capabilities"], list):
+              raise SystemExit("capabilities must be an array")
+          if manifest["id"] != "provider-template":
+              raise SystemExit("unexpected template id")
+          PY

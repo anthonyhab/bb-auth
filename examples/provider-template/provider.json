@@ -1,0 +1,9 @@
+{
+  "id": "provider-template",
+  "name": "Provider Template",
+  "kind": "custom",
+  "priority": 20,
+  "exec": "bb-auth-provider-template",
+  "autostart": true,
+  "capabilities": ["password", "cancel", "status"]
+}
