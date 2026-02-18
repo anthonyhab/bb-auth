@@ -36,8 +36,11 @@
 .vscode/
 .cache/
 build/
+build-*/
 build-dev/
 build-analysis/
 build-check/
+build-daemon-smoke.log
+result
 
 compile_commands.json

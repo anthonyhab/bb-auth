@@ -6,16 +6,21 @@
 #include <QAction>
 #include <QCoreApplication>
 #include <QFontMetrics>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QLabel>
 #include <QKeySequence>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QResizeEvent>
+#include <QScreen>
 #include <QShortcut>
 #include <QSizePolicy>
+#include <QShowEvent>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QWindow>
 
 namespace {
     QPair<QString, bool> collapseDetailText(const QString& text, int maxLines, int maxChars) {
@@ -340,8 +345,10 @@ namespace bb {
             show();
             raise();
             activateWindow();
-            QTimer::singleShot(0, this, [this]() { ensureContentFits(); });
-            QTimer::singleShot(30, this, [this]() { ensureContentFits(); });
+            scheduleEnsureContentFits(0);
+            scheduleEnsureContentFits(30);
+            scheduleEnsureContentFits(120);
+            scheduleEnsureContentFits(260);
 
             if (!m_confirmOnly) {
                 m_input->setFocus();
@@ -476,6 +483,23 @@ namespace bb {
         event->accept();
     }
 
+    void FallbackWindow::showEvent(QShowEvent* event) {
+        QWidget::showEvent(event);
+
+        // Wayland compositors can apply initial/tiled geometry after map; run
+        // multiple fit passes to converge without requiring user interaction.
+        scheduleEnsureContentFits(0);
+        scheduleEnsureContentFits(40);
+        scheduleEnsureContentFits(140);
+    }
+
+    void FallbackWindow::resizeEvent(QResizeEvent* event) {
+        QWidget::resizeEvent(event);
+        if (isVisible()) {
+            scheduleEnsureContentFits(0);
+        }
+    }
+
     void FallbackWindow::setBusy(bool busy) {
         m_busy = busy;
         m_submitButton->setEnabled(!m_busy);
@@ -551,26 +575,26 @@ namespace bb {
         if (text.isEmpty()) {
             m_errorLabel->clear();
             m_errorLabel->hide();
-            ensureContentFits();
+            scheduleEnsureContentFits();
             return;
         }
 
         m_errorLabel->setText(text);
         m_errorLabel->show();
-        ensureContentFits();
+        scheduleEnsureContentFits();
     }
 
     void FallbackWindow::setStatusText(const QString& text) {
         if (text.isEmpty()) {
             m_statusLabel->clear();
             m_statusLabel->hide();
-            ensureContentFits();
+            scheduleEnsureContentFits();
             return;
         }
 
         m_statusLabel->setText(text);
         m_statusLabel->show();
-        ensureContentFits();
+        scheduleEnsureContentFits();
     }
 
     void FallbackWindow::setDetailsText(const QString& text) {
@@ -604,7 +628,7 @@ namespace bb {
         const QString text = (m_contextExpanded || !m_contextExpandable) ? m_fullContextText : m_collapsedContextText;
         m_contextLabel->setText(text);
         m_contextLabel->setVisible(!text.isEmpty());
-        ensureContentFits();
+        scheduleEnsureContentFits();
 
         if (m_contextExpandable) {
             m_contextToggleButton->setText(m_contextExpanded ? "Show less" : "Show more");
@@ -636,7 +660,17 @@ namespace bb {
         int bottom = 0;
         rootLayout->getContentsMargins(&left, &top, &right, &bottom);
 
-        const int currentContentWidth   = qMax(360, qMax(m_baseWidth, width()) - left - right);
+        const QScreen* screen = windowHandle() ? windowHandle()->screen() : QGuiApplication::primaryScreen();
+        const int      availableWidth  = screen ? qMax(320, screen->availableGeometry().width() - 32) : 680;
+        const int      availableHeight = screen ? qMax(220, screen->availableGeometry().height() - 32) : 640;
+
+        const int maxWidth  = qMin(680, availableWidth);
+        const int maxHeight = qMin(640, availableHeight);
+        const int minWidth  = qMin(m_minWidth, maxWidth);
+        const int minHeight = qMin(m_minHeight, maxHeight);
+
+        const int widthForHeight = qBound(minWidth, qMax(width(), m_baseWidth), maxWidth);
+        const int currentContentWidth = qMax(320, widthForHeight - left - right);
         int       requiredContentHeight = m_contentWidget->sizeHint().height();
         int       requiredContentWidth  = m_contentWidget->sizeHint().width();
 
@@ -650,12 +684,35 @@ namespace bb {
             requiredContentWidth = contentLayout->sizeHint().width();
         }
 
-        const int baselineWidth = m_baseWidth;
-        const int targetWidth   = qBound(m_minWidth, qMax(baselineWidth, requiredContentWidth + left + right), 680);
-        const int targetHeight  = qBound(m_minHeight, requiredContentHeight + top + bottom + 8, 640);
+        const int baselineWidth = qBound(minWidth, m_baseWidth, maxWidth);
+        const int targetWidth   = qBound(minWidth, qMax(baselineWidth, requiredContentWidth + left + right), maxWidth);
+        const int targetHeight  = qBound(minHeight, requiredContentHeight + top + bottom + 8, maxHeight);
+
+        if (minimumWidth() != minWidth || minimumHeight() != minHeight) {
+            setMinimumSize(minWidth, minHeight);
+        }
+        if (maximumWidth() != maxWidth || maximumHeight() != maxHeight) {
+            setMaximumSize(maxWidth, maxHeight);
+        }
         if (targetWidth != width() || targetHeight != height()) {
             resize(targetWidth, targetHeight);
         }
+    }
+
+    void FallbackWindow::scheduleEnsureContentFits(int delayMs) {
+        if (delayMs <= 0) {
+            if (m_fitRefreshScheduled) {
+                return;
+            }
+            m_fitRefreshScheduled = true;
+            QTimer::singleShot(0, this, [this]() {
+                m_fitRefreshScheduled = false;
+                ensureContentFits();
+            });
+            return;
+        }
+
+        QTimer::singleShot(delayMs, this, [this]() { ensureContentFits(); });
     }
 
     void FallbackWindow::configureSizingForIntent(PromptIntent intent) {
@@ -679,6 +736,7 @@ namespace bb {
         }
 
         setMinimumSize(m_minWidth, m_minHeight);
+        setMaximumSize(680, 640);
     }
 
     FallbackWindow::PromptDisplayModel FallbackWindow::buildDisplayModel(const QJsonObject& event) const {

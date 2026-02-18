@@ -272,8 +272,3 @@ install(FILES ${CMAKE_BINARY_DIR}/bb-auth-dbus.service
 # Install keyring prompter D-Bus service file template
 install(FILES ${CMAKE_BINARY_DIR}/org.gnome.keyring.SystemPrompter.service
         DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth)
-
-# Install migration script (temporary - will be removed in future release)
-install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/bb-auth-migrate.sh
-        DESTINATION ${CMAKE_INSTALL_BINDIR}
-        RENAME bb-auth-migrate)

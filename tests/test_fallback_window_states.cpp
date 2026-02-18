@@ -86,6 +86,7 @@ namespace bb {
         void keyboardTabOrder_cyclesPrimaryControls();
         void scaling_largeFontExpandsControlHeights();
         void contrast_textUsesReadablePaletteContrast();
+        void compositorResize_reappliesContentFitWithoutMove();
         void submitTimeout_releasesBusyAndShowsRetry();
         void cancelTimeout_releasesBusyAndShowsError();
         void closedError_autoDismissesToAvoidDeadEnd();
@@ -222,6 +223,25 @@ namespace bb {
         checkLabelContrast(window.m_promptLabel);
         checkLabelContrast(window.m_errorLabel);
         checkLabelContrast(window.m_statusLabel);
+    }
+
+    void FallbackWindowTouchModelTest::compositorResize_reappliesContentFitWithoutMove() {
+        FallbackClient client("/tmp/non-existent-bb-auth.sock");
+        FallbackWindow window(&client);
+
+        const QJsonObject created = makeCreatedEvent("resize-refit");
+        QVERIFY(QMetaObject::invokeMethod(&client, "sessionCreated", Qt::DirectConnection, Q_ARG(QJsonObject, created)));
+        QTRY_VERIFY_WITH_TIMEOUT(window.isVisible(), 1000);
+
+        const int fittedHeight = window.height();
+        const int oversizedHeight = qMin(620, fittedHeight + 260);
+        QVERIFY(oversizedHeight > fittedHeight);
+
+        window.resize(window.width(), oversizedHeight);
+
+        // Hyprland/Wayland may deliver external geometry updates after map; the
+        // window should re-fit content without requiring manual move/drag.
+        QTRY_VERIFY_WITH_TIMEOUT(window.height() <= (fittedHeight + 8), 1500);
     }
 
     void FallbackWindowTouchModelTest::submitTimeout_releasesBusyAndShowsRetry() {

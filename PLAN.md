@@ -1,7 +1,7 @@
 # bb-auth Plan
 
 Last updated: 2026-02-18
-Owner branch: `dev/jules-vet`
+Owner branch: `main`
 
 ## Vision
 
@@ -123,7 +123,7 @@ Goal: repeatable releases with low regression risk.
 
 Tasks:
 
-- [ ] Define release gates (`build`, `ctest`, packaging smoke, service smoke).
+- [x] Define release gates (`build`, `ctest`, packaging smoke, service smoke).
 - [ ] Add migration notes and upgrade checks for each release.
 - [ ] Publish compatibility matrix (core version vs provider protocol).
 - [ ] Automate package validation in CI for core-only and optional-provider scenarios.
@@ -193,3 +193,4 @@ Do not:
 - 2026-02-18: Tightened fallback error/cancel/retry/timeout UX with pending-action timeouts, pinentry retry status copy, and closed-error auto-dismiss coverage.
 - 2026-02-18: Added keyboard-first fallback UX checks (Enter submit, keyboard cancel activation, tab-order traversal where supported) and explicit pending-action focus recovery.
 - 2026-02-18: Completed fallback accessibility checks by hardening keyboard-only cancel recovery during submit-pending, switching UI text styling to theme-aware palette defaults for contrast resilience, and adding scaling/contrast regression tests.
+- 2026-02-18: Added `scripts/gate-local.sh` and `docs/LOCAL_RELEASE_WORKFLOW.md` to enforce local pre-main build/test/install/daemon gates before release-facing merges.

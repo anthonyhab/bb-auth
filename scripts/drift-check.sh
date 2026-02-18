@@ -10,7 +10,7 @@ echo "== runtime drift check =="
 # Exclude files that intentionally reference the old repo name (github URLs, AUR refs, etc.)
 legacy_runtime_refs=$(git grep -nE \
   'noctalia-auth|noctalia-polkit|pinentry-noctalia|noctalia-keyring-prompter|noctalia-prompt|org\.noctalia\.polkitagent' \
-  -- . ':!scripts/drift-check.sh' ':!scripts/bb-auth-migrate.sh' ':!README.md' ':!docs/*.md' ':!PKGBUILD' ':!build-dev.sh' ':!nix/*.nix' || true)
+  -- . ':!scripts/drift-check.sh' ':!README.md' ':!docs/*.md' ':!PKGBUILD' ':!nix/*.nix' || true)
 
 if [ -n "$legacy_runtime_refs" ]; then
   echo "[fail] legacy runtime identifiers found:"

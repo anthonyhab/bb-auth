@@ -9,6 +9,8 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTimer;
+class QResizeEvent;
+class QShowEvent;
 
 namespace bb {
 
@@ -22,6 +24,8 @@ namespace bb {
 
       protected:
         void closeEvent(QCloseEvent* event) override;
+        void showEvent(QShowEvent* event) override;
+        void resizeEvent(QResizeEvent* event) override;
 
       private:
         using PromptIntent       = bb::fallback::prompt::PromptIntent;
@@ -42,6 +46,7 @@ namespace bb {
         void               setDetailsText(const QString& text);
         void               setDetailsExpanded(bool expanded);
         void               ensureContentFits();
+        void               scheduleEnsureContentFits(int delayMs = 0);
         void               configureSizingForIntent(PromptIntent intent);
         PromptDisplayModel buildDisplayModel(const QJsonObject& event) const;
 
@@ -80,6 +85,7 @@ namespace bb {
         // Idle exit timer - process exits when hidden with no active session
         QTimer* m_idleExitTimer = nullptr;
         QTimer* m_actionTimeoutTimer = nullptr;
+        bool    m_fitRefreshScheduled = false;
 
         void    startIdleExitTimer();
         void    stopIdleExitTimer();

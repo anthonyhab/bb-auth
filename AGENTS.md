@@ -1,63 +1,66 @@
 # AGENTS.md
 
-Project guidance for coding agents and contributors in this repository.
+Compact guide for coding agents in this repo.
 
-## Primary Reference
+## Mission
 
-- Read `PLAN.md` first.
-- Align each session to one phase and a small set of checkboxes.
+- Keep `bb-auth` core minimal, deterministic, and auth-safe.
+- Keep optional UX/provider stacks out of core dependencies.
+- Prefer small, test-backed diffs over broad rewrites.
 
-## Core Rules
+## Read Order
 
-1. Keep the core package minimal and deterministic.
-2. Keep optional providers out of core dependencies.
-3. Preserve provider runtime drop-in behavior through `providers.d`.
-4. Treat `docs/PROVIDER_CONTRACT.md` as a compatibility contract.
-5. Prefer simple, test-backed changes over broad refactors.
+1. `PLAN.md` (current phase + tasks)
+2. `docs/PROVIDER_CONTRACT.md` (protocol boundary)
+3. `README.md` (user-facing behavior)
 
-## Architecture Boundary
+## Repo Map
 
-Core (`bb-auth`) owns:
+- `src/core/`: daemon, session, provider orchestration, IPC
+- `src/fallback/`: built-in Qt fallback UI
+- `src/modes/`: daemon/keyring/pinentry entry paths
+- `tests/`: Qt tests and protocol/conformance checks
+- `examples/provider-template/`: external provider template
+- `docs/`: contract, packaging, troubleshooting, workflow
 
-- daemon/session/provider orchestration
-- provider discovery/validation/launch
-- built-in Qt fallback provider
-
-Optional provider packages own:
-
-- desktop-specific provider binaries (GTK, others)
-- their dependency stacks and release cadence
-
-## Change Process
-
-For every non-trivial change:
-
-1. State acceptance criteria before coding.
-2. Implement the smallest coherent slice.
-3. Add or update tests.
-4. Run verification commands.
-5. Update docs when behavior changes.
-
-## Verification Baseline
-
-Run before merge:
+## One Command Before Main
 
 ```bash
-cmake -S . -B build-check -DCMAKE_BUILD_TYPE=Release
-cmake --build build-check -j"$(nproc)"
-ctest --test-dir build-check --output-on-failure
+./scripts/gate-local.sh
 ```
 
-If packaging/build options changed, also test:
+This runs:
+- build + tests (`build-check`, `build-core`)
+- install smoke
+- daemon smoke (strict mode available)
+
+Useful variants:
 
 ```bash
-cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Release
-cmake --build build-core -j"$(nproc)"
-ctest --test-dir build-core --output-on-failure
+./scripts/gate-local.sh --quick
+./scripts/gate-local.sh --aur-smoke
+STRICT_DAEMON_SMOKE=1 ./scripts/gate-local.sh
 ```
 
-## Do Not
+## Change Rules
 
-- Add optional UX stacks as hard dependencies in core packaging.
-- Change provider protocol semantics without contract and tests.
-- Merge untested UX behavior changes in auth-critical flows.
+For non-trivial changes:
+
+1. State acceptance criteria.
+2. Implement smallest coherent slice.
+3. Add/update tests.
+4. Run local gates.
+5. Update docs if behavior changed.
+
+## Hard Boundaries
+
+- Do not add optional provider/runtime deps to core package.
+- Do not change provider protocol semantics without docs + tests.
+- Do not merge auth-flow UX changes without keyboard-path validation.
+
+## Release Discipline
+
+- Treat `main` as release-facing.
+- Work on feature/staging branches.
+- Merge only when local gates + CI are green.
+- Prefer squash merge to keep history compact.
