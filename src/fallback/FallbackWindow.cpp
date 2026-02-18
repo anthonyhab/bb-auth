@@ -1,265 +1,36 @@
 #include "FallbackWindow.hpp"
+#include "prompt/PromptModelBuilder.hpp"
+#include "prompt/TextNormalize.hpp"
 
 #include <QCloseEvent>
 #include <QAction>
 #include <QCoreApplication>
-#include <QFileInfo>
+#include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QLabel>
 #include <QKeySequence>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QRegularExpression>
+#include <QShortcut>
 #include <QSizePolicy>
 #include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
-
-    QString normalizeDetailText(const QString& text) {
-        QString normalized = text;
-        normalized.replace('\r', '\n');
-        QStringList lines = normalized.split('\n');
-        QStringList cleaned;
-        cleaned.reserve(lines.size());
-        for (const QString& line : lines) {
-            const QString simplified = line.simplified();
-            if (!simplified.isEmpty()) {
-                cleaned << simplified;
-            }
-        }
-
-        return cleaned.join("\n");
-    }
-
-    QString normalizeCompareText(const QString& text) {
-        QString normalized = normalizeDetailText(text).toLower();
-        normalized.replace('`', ' ');
-        normalized.replace('"', ' ');
-        normalized.replace(',', ' ');
-        normalized.replace('.', ' ');
-        normalized = normalized.simplified();
-        return normalized;
-    }
-
-    bool textEquivalent(const QString& left, const QString& right) {
-        const QString a = normalizeCompareText(left);
-        const QString b = normalizeCompareText(right);
-        if (a.isEmpty() || b.isEmpty()) {
-            return false;
-        }
-
-        return a == b || a.startsWith(b) || b.startsWith(a);
-    }
-
-    QString firstMeaningfulLine(const QString& text) {
-        const QString cleaned = normalizeDetailText(text);
-        if (cleaned.isEmpty()) {
-            return QString();
-        }
-
-        const int newline = cleaned.indexOf('\n');
-        if (newline == -1) {
-            return cleaned;
-        }
-
-        return cleaned.left(newline);
-    }
-
-    QString captureFirst(const QString& text, const QRegularExpression& regex) {
-        const QRegularExpressionMatch match = regex.match(text);
-        if (!match.hasMatch()) {
-            return QString();
-        }
-
-        return match.captured(1).trimmed();
-    }
-
-    QString cleanIdentity(QString identity) {
-        identity = identity.simplified();
-        identity.replace(" (github)", "", Qt::CaseInsensitive);
-        return identity.trimmed();
-    }
-
-    QString trimToLength(const QString& text, int maxChars) {
-        if (text.size() <= maxChars) {
-            return text;
-        }
-
-        return text.left(maxChars - 3).trimmed() + "...";
-    }
-
-    bool isLowSignalCommand(const QString& commandName) {
-        const QString normalized = commandName.trimmed().toLower();
-        if (normalized.isEmpty()) {
-            return true;
-        }
-
-        static const QStringList lowSignal = {QStringLiteral("true"), QStringLiteral("sh"), QStringLiteral("bash")};
-        return lowSignal.contains(normalized);
-    }
-
-    bool isIdentityLine(const QString& line) {
-        return line.contains('"') && line.contains('<') && line.contains('>');
-    }
-
-    bool isKeyMetadataLine(const QString& line) {
-        const QString lower = line.toLower();
-        return (lower.contains(" id ") || lower.startsWith("id ")) && lower.contains("created");
-    }
-
-    bool containsAnyTerm(const QString& text, std::initializer_list<const char*> terms) {
-        const QString lower = text.toLower();
-        for (const char* term : terms) {
-            if (lower.contains(QString::fromLatin1(term))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    bool looksLikeFingerprintPrompt(const QString& text) {
-        return containsAnyTerm(text, {"fingerprint", "finger print", "fprint", "swipe", "scan your finger"});
-    }
-
-    bool looksLikeFidoPrompt(const QString& text) {
-        return containsAnyTerm(text, {"fido", "fido2", "webauthn", "security key", "yubikey", "hardware token", "user presence"});
-    }
-
-    bool looksLikeTouchPrompt(const QString& text) {
-        return containsAnyTerm(text, {"touch", "tap", "insert", "use your security key", "verify your identity"});
-    }
-
-    QString extractCommandName(const QString& message) {
-        const QRegularExpression explicitRunRegex(R"(run\s+[`'"]([^`'"\s]+)[`'"])", QRegularExpression::CaseInsensitiveOption);
-        QString                  command = captureFirst(message, explicitRunRegex);
-
-        if (command.isEmpty()) {
-            const QRegularExpression pathRegex(R"((/[A-Za-z0-9_\-\./]+))");
-            command = captureFirst(message, pathRegex);
-        }
-
-        if (command.isEmpty()) {
-            return QString();
-        }
-
-        const QString commandName = QFileInfo(command).fileName();
-        return commandName.isEmpty() ? command : commandName;
-    }
-
-    QString extractUnlockTarget(const QString& text) {
-        const QString normalized = normalizeDetailText(text);
-        if (normalized.isEmpty()) {
-            return QString();
-        }
-
-        const QRegularExpression unlockRegex(R"(unlock\s+([^\n]+))", QRegularExpression::CaseInsensitiveOption);
-        QString                  target = captureFirst(normalized, unlockRegex);
-        if (target.isEmpty()) {
-            return QString();
-        }
-
-        target = target.trimmed();
-        if (target.endsWith('.')) {
-            target.chop(1);
-        }
-
-        return target.trimmed();
-    }
-
-    QString uniqueJoined(const QStringList& values) {
-        QStringList filtered;
-        filtered.reserve(values.size());
-        for (const QString& value : values) {
-            const QString simplified = value.trimmed();
-            if (simplified.isEmpty()) {
-                continue;
-            }
-
-            bool duplicate = false;
-            for (const QString& existing : filtered) {
-                if (textEquivalent(existing, simplified)) {
-                    duplicate = true;
-                    break;
-                }
-            }
-
-            if (!duplicate) {
-                filtered << simplified;
-            }
-        }
-
-        return filtered.join("\n");
-    }
-
-    QString extractUnlockTargetFromContext(const QJsonObject& context) {
-        QString target = extractUnlockTarget(context.value("keyringName").toString());
-        if (target.isEmpty()) {
-            target = extractUnlockTarget(context.value("message").toString());
-        }
-        if (target.isEmpty()) {
-            target = extractUnlockTarget(context.value("description").toString());
-        }
-        return target;
-    }
-
-    bool isTemplateUnlockLine(const QString& line, const QString& target) {
-        const QString normalized = normalizeCompareText(line);
-        if (normalized.isEmpty()) {
-            return true;
-        }
-
-        const QString normalizedTarget = normalizeCompareText(target);
-        if (!normalizedTarget.isEmpty() && normalized == normalizedTarget) {
-            return true;
-        }
-
-        if (!normalizedTarget.isEmpty() && normalized.contains("unlock") && normalized.contains(normalizedTarget)) {
-            if (normalized.startsWith("authenticate to unlock") || normalized.startsWith("unlock") || normalized.startsWith("use your password to unlock") ||
-                normalized.startsWith("use your account password to unlock")) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    QString buildUnlockDetails(const QJsonObject& context, const QString& target) {
-        QStringList       details;
-
-        const QStringList candidates = {normalizeDetailText(context.value("description").toString()), normalizeDetailText(context.value("message").toString()),
-                                        normalizeDetailText(context.value("keyringName").toString())};
-
-        for (const QString& candidate : candidates) {
-            if (candidate.isEmpty()) {
-                continue;
-            }
-
-            const QStringList lines = candidate.split('\n');
-            for (const QString& rawLine : lines) {
-                const QString line = rawLine.trimmed();
-                if (line.isEmpty() || isTemplateUnlockLine(line, target)) {
-                    continue;
-                }
-                details << line;
-            }
-        }
-
-        return uniqueJoined(details);
-    }
-
     QPair<QString, bool> collapseDetailText(const QString& text, int maxLines, int maxChars) {
-        if (text.isEmpty()) {
+        const QString normalizedText = bb::fallback::prompt::normalizeDetailText(text);
+        if (normalizedText.isEmpty()) {
             return qMakePair(QString(), false);
         }
 
-        const QStringList lines = text.split('\n');
+        const QStringList lines = normalizedText.split('\n');
         QStringList       collapsedLines;
         collapsedLines.reserve(lines.size());
 
-        int  usedChars = 0;
-        bool truncated = false;
+        qsizetype usedChars = 0;
+        bool      truncated = false;
+        const qsizetype maxCharsBound = static_cast<qsizetype>(maxChars);
 
         for (const QString& line : lines) {
             if (collapsedLines.size() >= maxLines) {
@@ -268,9 +39,9 @@ namespace {
             }
 
             QString clipped = line;
-            if ((usedChars + clipped.size()) > maxChars) {
-                const int remaining = qMax(0, maxChars - usedChars);
-                clipped             = remaining > 0 ? clipped.left(remaining).trimmed() : QString();
+            if ((usedChars + clipped.size()) > maxCharsBound) {
+                const qsizetype remaining = qMax(static_cast<qsizetype>(0), maxCharsBound - usedChars);
+                clipped                   = remaining > 0 ? clipped.left(remaining).trimmed() : QString();
                 if (!clipped.isEmpty()) {
                     collapsedLines << clipped;
                 }
@@ -324,22 +95,20 @@ namespace bb {
         promptLayout->setContentsMargins(0, 0, 0, 0);
         promptLayout->setSpacing(10);
         m_titleLabel = new QLabel("Authentication Required", m_contentWidget);
-        m_titleLabel->setStyleSheet("font-weight: 700; font-size: 17px;");
+        m_titleLabel->setStyleSheet("font-weight: 700;");
         m_summaryLabel = new QLabel(m_contentWidget);
         m_summaryLabel->setWordWrap(true);
-        m_summaryLabel->setStyleSheet("font-weight: 600; color: #d1d7d3; font-size: 14px;");
+        m_summaryLabel->setStyleSheet("font-weight: 600;");
         m_summaryLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
         m_summaryLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
         m_summaryLabel->hide();
         m_requestorLabel = new QLabel(m_contentWidget);
         m_requestorLabel->setWordWrap(true);
-        m_requestorLabel->setStyleSheet("color: #aeb6b1; font-size: 13px;");
         m_requestorLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
         m_requestorLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
         m_requestorLabel->hide();
         m_contextLabel = new QLabel(m_contentWidget);
         m_contextLabel->setWordWrap(true);
-        m_contextLabel->setStyleSheet("color: #bcc4bf; font-size: 13px;");
         m_contextLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
         m_contextLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
         m_contextLabel->hide();
@@ -347,14 +116,15 @@ namespace bb {
         m_contextToggleButton->setCursor(Qt::PointingHandCursor);
         m_contextToggleButton->setFlat(true);
         m_contextToggleButton->setStyleSheet(
-            "QPushButton { color: #8fb59a; border: none; padding: 0; text-align: left; } QPushButton:hover { color: #a6c8af; text-decoration: underline; }");
+            "QPushButton { border: none; padding: 0; text-align: left; } QPushButton:hover { text-decoration: underline; }");
         m_contextToggleButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         m_contextToggleButton->hide();
         m_promptLabel = new QLabel("Password:", m_contentWidget);
         m_promptLabel->setStyleSheet("font-weight: 600;");
         m_input = new QLineEdit(m_contentWidget);
         m_input->setEchoMode(QLineEdit::Password);
-        m_input->setMinimumHeight(38);
+        const int inputHeight = qMax(38, QFontMetrics(m_input->font()).height() + 16);
+        m_input->setMinimumHeight(inputHeight);
         m_input->setTextMargins(12, 0, 12, 0);
         m_input->setPlaceholderText("Enter password");
         auto* togglePasswordAction = m_input->addAction("Show", QLineEdit::TrailingPosition);
@@ -368,23 +138,24 @@ namespace bb {
         m_errorLabel = new QLabel(m_contentWidget);
         m_errorLabel->setWordWrap(true);
         m_errorLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-        m_errorLabel->setStyleSheet("color: #cc4a4a;");
+        m_errorLabel->setStyleSheet("font-weight: 600;");
         m_errorLabel->hide();
         m_statusLabel = new QLabel(m_contentWidget);
         m_statusLabel->setWordWrap(true);
         m_statusLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-        m_statusLabel->setStyleSheet("color: #999;");
         m_statusLabel->hide();
         auto* buttonRow = new QHBoxLayout();
         buttonRow->setSpacing(8);
         m_cancelButton = new QPushButton("Cancel", m_contentWidget);
         m_cancelButton->setShortcut(QKeySequence::Cancel);
         m_submitButton = new QPushButton("Authenticate", m_contentWidget);
-        m_cancelButton->setMinimumHeight(34);
-        m_submitButton->setMinimumHeight(34);
+        const int buttonHeight = qMax(34, QFontMetrics(m_submitButton->font()).height() + 14);
+        m_cancelButton->setMinimumHeight(buttonHeight);
+        m_submitButton->setMinimumHeight(buttonHeight);
         m_cancelButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         m_submitButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         m_submitButton->setDefault(true);
+        m_submitButton->setAutoDefault(true);
         buttonRow->addWidget(m_cancelButton, 1);
         buttonRow->addWidget(m_submitButton, 1);
         headerLayout->addWidget(m_titleLabel);
@@ -401,6 +172,12 @@ namespace bb {
         layout->addLayout(promptLayout);
         layout->addStretch(1);
         layout->addLayout(buttonRow);
+
+        // Keep keyboard traversal deterministic for input-only operation.
+        setTabOrder(m_input, m_contextToggleButton);
+        setTabOrder(m_contextToggleButton, m_cancelButton);
+        setTabOrder(m_cancelButton, m_submitButton);
+
         hide();
         ensureContentFits();
 
@@ -412,11 +189,44 @@ namespace bb {
         m_idleExitTimer->setInterval(qMax(5000, idleTimeoutMs)); // Minimum 5s safety
         connect(m_idleExitTimer, &QTimer::timeout, this, []() { QCoreApplication::quit(); });
 
+        m_actionTimeoutTimer = new QTimer(this);
+        m_actionTimeoutTimer->setSingleShot(true);
+        const QByteArray actionTimeoutEnv = qgetenv("BB_AUTH_FALLBACK_ACTION_TIMEOUT_MS");
+        const int        actionTimeoutMs  = actionTimeoutEnv.isEmpty() ? 12000 : QString::fromLatin1(actionTimeoutEnv).toInt();
+        m_actionTimeoutTimer->setInterval(qBound(250, actionTimeoutMs, 120000));
+        connect(m_actionTimeoutTimer, &QTimer::timeout, this, [this]() {
+            if (m_currentSessionId.isEmpty() || m_pendingAction == PendingAction::None) {
+                return;
+            }
+
+            const PendingAction timedOutAction = m_pendingAction;
+            clearPendingAction();
+            setBusy(false);
+            setStatusText("");
+
+            if (timedOutAction == PendingAction::Cancel) {
+                setErrorText("Cancel request timed out. Try again.");
+                m_cancelButton->setFocus();
+            } else {
+                setErrorText("Authentication request timed out. Review details and retry.");
+                if (!m_confirmOnly) {
+                    m_submitButton->setText("Retry");
+                    m_input->setFocus();
+                } else {
+                    m_submitButton->setFocus();
+                }
+            }
+        });
+
         connect(m_input, &QLineEdit::returnPressed, this, [this]() {
             if (m_submitButton->isEnabled()) {
                 m_submitButton->click();
             }
         });
+
+        auto* cancelShortcut = new QShortcut(QKeySequence::Cancel, this);
+        cancelShortcut->setContext(Qt::WindowShortcut);
+        connect(cancelShortcut, &QShortcut::activated, this, [this]() { handleCancelRequest(); });
 
         connect(m_submitButton, &QPushButton::clicked, this, [this]() {
             if (!m_client || m_currentSessionId.isEmpty()) {
@@ -431,6 +241,7 @@ namespace bb {
 
             setErrorText("");
             setStatusText("Verifying...");
+            startPendingAction(PendingAction::Submit);
 
             const QString response = m_confirmOnly ? QString("confirm") : m_input->text();
             m_client->sendResponse(m_currentSessionId, response);
@@ -442,16 +253,7 @@ namespace bb {
             setBusy(true);
         });
 
-        connect(m_cancelButton, &QPushButton::clicked, this, [this]() {
-            if (!m_client || m_currentSessionId.isEmpty()) {
-                hide();
-                return;
-            }
-
-            setStatusText("Cancelling...");
-            setBusy(true);
-            m_client->sendCancel(m_currentSessionId);
-        });
+        connect(m_cancelButton, &QPushButton::clicked, this, [this]() { handleCancelRequest(); });
 
         connect(m_contextToggleButton, &QPushButton::clicked, this, [this]() {
             if (!m_contextExpandable) {
@@ -497,10 +299,13 @@ namespace bb {
             }
 
             m_currentSessionId             = id;
-            m_confirmOnly                  = event.value("context").toObject().value("confirmOnly").toBool();
+            m_currentSource                = event.value("source").toString();
+            m_currentContext               = event.value("context").toObject();
+            m_confirmOnly                  = m_currentContext.value("confirmOnly").toBool();
             m_allowEmptyResponse           = false;
             const PromptDisplayModel model = buildDisplayModel(event);
             configureSizingForIntent(model.intent);
+            clearPendingAction();
 
             m_titleLabel->setText(model.title);
             m_summaryLabel->setText(model.summary);
@@ -540,6 +345,8 @@ namespace bb {
 
             if (!m_confirmOnly) {
                 m_input->setFocus();
+            } else {
+                m_submitButton->setFocus();
             }
         });
 
@@ -550,37 +357,32 @@ namespace bb {
             }
 
             const QString prompt = event.value("prompt").toString();
+            const QString info   = event.value("info").toString().trimmed();
+            const QString source = m_currentSource.isEmpty() ? event.value("source").toString() : m_currentSource;
+            QJsonObject   context = m_currentContext.isEmpty() ? event.value("context").toObject() : m_currentContext;
+            QJsonObject   merged = QJsonObject{{"source", source}, {"context", context}};
             if (!prompt.isEmpty()) {
-                m_promptLabel->setText(prompt);
+                merged.insert("prompt", prompt);
             }
-
-            const QString info              = event.value("info").toString().trimmed();
-            const QString hint              = prompt + "\n" + info;
-            const bool    fingerprintPrompt = looksLikeFingerprintPrompt(hint);
-            const bool    fidoPrompt        = looksLikeFidoPrompt(hint);
-            const bool    touchPrompt       = fingerprintPrompt || fidoPrompt || looksLikeTouchPrompt(hint);
-
-            if (fingerprintPrompt) {
-                m_titleLabel->setText("Verify Fingerprint");
-            } else if (fidoPrompt) {
-                m_titleLabel->setText("Use Security Key");
+            if (!info.isEmpty()) {
+                merged.insert("info", info);
             }
+            const PromptDisplayModel model = buildDisplayModel(merged);
+            clearPendingAction();
+
+            m_titleLabel->setText(model.title);
 
             if (!m_confirmOnly) {
-                m_allowEmptyResponse = touchPrompt;
-                if (touchPrompt) {
-                    m_promptLabel->setText("Press Enter to continue (or wait)");
+                m_allowEmptyResponse = model.allowEmptyResponse;
+                m_promptLabel->setText(model.prompt);
+                if (model.allowEmptyResponse) {
                     m_input->setPlaceholderText("Press Enter to continue (optional)");
                     m_submitButton->setText("Continue");
                 } else {
-                    const bool passphrasePrompt = m_promptLabel->text().contains("passphrase", Qt::CaseInsensitive);
+                    const bool passphrasePrompt = model.passphrasePrompt;
                     m_input->setPlaceholderText(passphrasePrompt ? QString("Enter passphrase") : QString("Enter password"));
                     m_submitButton->setText("Authenticate");
                 }
-            }
-
-            if (!info.isEmpty()) {
-                setStatusText(info);
             }
 
             if (event.contains("echo")) {
@@ -591,18 +393,31 @@ namespace bb {
             const QString error = event.value("error").toString();
             if (!error.isEmpty()) {
                 setErrorText(error);
+                if (!m_confirmOnly) {
+                    m_submitButton->setText("Retry");
+                }
             } else {
                 setErrorText("");
             }
 
-            if (info.isEmpty()) {
-                setStatusText("");
+            if (!info.isEmpty()) {
+                setStatusText(info);
+            } else {
+                const int curRetry = event.value("curRetry").toInt();
+                const int maxRetry = event.value("maxRetries").toInt();
+                if (m_currentSource == "pinentry" && curRetry > 0 && maxRetry > 0) {
+                    setStatusText(QString("Attempt %1 of %2").arg(curRetry).arg(maxRetry));
+                } else {
+                    setStatusText("");
+                }
             }
 
             setBusy(false);
 
             if (!m_confirmOnly) {
                 m_input->setFocus();
+            } else {
+                m_submitButton->setFocus();
             }
         });
 
@@ -614,6 +429,7 @@ namespace bb {
 
             const QString result = event.value("result").toString();
             const QString error  = event.value("error").toString();
+            clearPendingAction();
 
             if (result == "success") {
                 setErrorText("");
@@ -639,8 +455,15 @@ namespace bb {
                 setErrorText("Authentication failed.");
             }
 
-            setStatusText("");
+            setStatusText("Request ended.");
             setBusy(false);
+            QTimer::singleShot(1200, this, [this, id]() {
+                if (m_currentSessionId == id) {
+                    clearSession();
+                    hide();
+                    startIdleExitTimer();
+                }
+            });
         });
     }
 
@@ -656,12 +479,58 @@ namespace bb {
     void FallbackWindow::setBusy(bool busy) {
         m_busy = busy;
         m_submitButton->setEnabled(!m_busy);
-        m_cancelButton->setEnabled(!m_busy);
+        const bool hasSession           = !m_currentSessionId.isEmpty();
+        const bool cancelInFlight       = m_busy && m_pendingAction == PendingAction::Cancel;
+        const bool cancelButtonEnabled  = hasSession && !cancelInFlight;
+        m_cancelButton->setEnabled(cancelButtonEnabled);
         m_input->setEnabled(!m_busy);
     }
 
+    void FallbackWindow::handleCancelRequest() {
+        if (m_currentSessionId.isEmpty()) {
+            hide();
+            startIdleExitTimer();
+            return;
+        }
+
+        if (m_busy && m_pendingAction == PendingAction::Cancel) {
+            return;
+        }
+
+        // If submit is already in-flight and transport is down, exiting locally avoids a keyboard dead-end.
+        if (m_busy && (!m_client || !m_client->isConnected())) {
+            clearSession();
+            hide();
+            startIdleExitTimer();
+            return;
+        }
+
+        setErrorText("");
+        setStatusText("Cancelling...");
+        startPendingAction(PendingAction::Cancel);
+        setBusy(true);
+        m_client->sendCancel(m_currentSessionId);
+    }
+
+    void FallbackWindow::startPendingAction(PendingAction action) {
+        m_pendingAction = action;
+        if (m_actionTimeoutTimer) {
+            m_actionTimeoutTimer->start();
+        }
+    }
+
+    void FallbackWindow::clearPendingAction() {
+        m_pendingAction = PendingAction::None;
+        if (m_actionTimeoutTimer) {
+            m_actionTimeoutTimer->stop();
+        }
+    }
+
     void FallbackWindow::clearSession() {
+        clearPendingAction();
         m_currentSessionId.clear();
+        m_currentSource.clear();
+        m_currentContext = QJsonObject{};
         m_confirmOnly        = false;
         m_activeIntent       = PromptIntent::Generic;
         m_allowEmptyResponse = false;
@@ -705,7 +574,7 @@ namespace bb {
     }
 
     void FallbackWindow::setDetailsText(const QString& text) {
-        m_fullContextText = normalizeDetailText(text);
+        m_fullContextText = bb::fallback::prompt::normalizeDetailText(text);
         if (m_fullContextText.isEmpty()) {
             m_collapsedContextText.clear();
             m_contextExpandable = false;
@@ -813,160 +682,8 @@ namespace bb {
     }
 
     FallbackWindow::PromptDisplayModel FallbackWindow::buildDisplayModel(const QJsonObject& event) const {
-        PromptDisplayModel model;
-        const QString      source                = event.value("source").toString();
-        const QJsonObject  context               = event.value("context").toObject();
-        const QJsonObject  requestor             = context.value("requestor").toObject();
-        const QString      message               = context.value("message").toString();
-        const QString      description           = context.value("description").toString();
-        const QString      requestorName         = requestor.value("name").toString().trimmed();
-        const QString      infoText              = normalizeDetailText(event.value("info").toString());
-        const QString      normalizedMessage     = normalizeDetailText(message);
-        const QString      normalizedDescription = normalizeDetailText(description);
-        const QString      detailText            = (normalizedDescription + " " + normalizedMessage).toLower();
-        const QString      authHintText          = (detailText + " " + infoText).toLower();
-        const QString      commandName           = (source == "polkit") ? extractCommandName(message) : QString();
-        QString            unlockTarget          = (source == "polkit" || source == "keyring") ? extractUnlockTargetFromContext(context) : QString();
-        const bool         fingerprintHint       = looksLikeFingerprintPrompt(authHintText);
-        const bool         fidoHint              = looksLikeFidoPrompt(authHintText);
-        const bool         touchHint             = fingerprintHint || fidoHint || looksLikeTouchPrompt(authHintText);
-        if (source == "keyring" && unlockTarget.isEmpty()) {
-            unlockTarget = requestorName;
-        }
-        if (source == "polkit" && fingerprintHint) {
-            model.intent = PromptIntent::Fingerprint;
-        } else if (source == "polkit" && fidoHint) {
-            model.intent = PromptIntent::Fido2;
-        } else if (source == "pinentry" && (detailText.contains("openpgp") || detailText.contains("gpg"))) {
-            model.intent = PromptIntent::OpenPgp;
-        } else if (source == "polkit" && !commandName.isEmpty()) {
-            model.intent = PromptIntent::RunCommand;
-        } else if ((source == "polkit" || source == "keyring") && !unlockTarget.isEmpty()) {
-            model.intent = PromptIntent::Unlock;
-        }
-        if (model.intent == PromptIntent::Unlock) {
-            model.title   = QString("Unlock %1").arg(unlockTarget);
-            model.summary = QString("Use your password to unlock %1").arg(unlockTarget);
-            model.details = buildUnlockDetails(context, unlockTarget);
-        } else if (model.intent == PromptIntent::Fingerprint) {
-            model.title   = QString("Verify Fingerprint");
-            model.summary = infoText.isEmpty() ? QString("Use your fingerprint sensor to continue") : firstMeaningfulLine(infoText);
-            model.details = normalizeDetailText(description);
-        } else if (model.intent == PromptIntent::Fido2) {
-            model.title   = QString("Use Security Key");
-            model.summary = infoText.isEmpty() ? QString("Touch your security key to continue") : firstMeaningfulLine(infoText);
-            model.details = normalizeDetailText(description);
-        } else if (model.intent == PromptIntent::RunCommand) {
-            model.title   = QString("Authorization Required");
-            model.summary = firstMeaningfulLine(normalizedDescription);
-            if (model.summary.isEmpty()) {
-                model.summary = firstMeaningfulLine(normalizedMessage);
-            }
-            if (model.summary.isEmpty()) {
-                model.summary = isLowSignalCommand(commandName) ? QString("Administrative privileges required") : QString("Run %1 as superuser").arg(commandName);
-            }
-            model.details.clear();
-        } else if (source == "pinentry") {
-            if (model.intent == PromptIntent::OpenPgp) {
-                model.title = QString("Unlock OpenPGP Key");
-            } else if (detailText.contains("ssh")) {
-                model.title = QString("Unlock SSH Key");
-            } else {
-                model.title = QString("Authentication Required");
-            }
-            const QString referenceText = description.isEmpty() ? message : description;
-            const QString identity      = cleanIdentity(captureFirst(referenceText, QRegularExpression(QStringLiteral("\"([^\"]+)\""))));
-            const QString keyId         = captureFirst(referenceText, QRegularExpression(R"(ID\s+([A-F0-9]{8,}))", QRegularExpression::CaseInsensitiveOption));
-            const QString keyType       = captureFirst(referenceText, QRegularExpression(R"((\d{3,5}-bit\s+[A-Za-z0-9-]+\s+key))", QRegularExpression::CaseInsensitiveOption));
-            const QString created       = captureFirst(referenceText, QRegularExpression(R"(created\s+([0-9]{4}-[0-9]{2}-[0-9]{2}))", QRegularExpression::CaseInsensitiveOption));
-            QStringList   pieces;
-            if (!identity.isEmpty()) {
-                pieces << trimToLength(identity, 72);
-            } else if (!keyType.isEmpty()) {
-                pieces << keyType;
-            }
-            if (!keyId.isEmpty()) {
-                pieces << keyId;
-            }
-            if (!created.isEmpty()) {
-                pieces << ("created " + created);
-            }
-            if (!pieces.isEmpty()) {
-                model.summary = pieces.join("  •  ");
-            } else {
-                model.summary = firstMeaningfulLine(referenceText);
-            }
-            const QString pinText = normalizeDetailText(description.isEmpty() ? message : description);
-            if (!pinText.isEmpty()) {
-                QStringList       filtered;
-                const QStringList lines = pinText.split('\n');
-                filtered.reserve(lines.size());
-                for (const QString& line : lines) {
-                    if (isIdentityLine(line) || isKeyMetadataLine(line)) {
-                        continue;
-                    }
-                    filtered << line;
-                }
-                model.details = filtered.isEmpty() ? pinText : filtered.join("\n");
-            }
-        } else {
-            model.title   = (source == "polkit") ? QString("Authorization Required") : QString("Authentication Required");
-            model.summary = firstMeaningfulLine(normalizedMessage);
-            if (model.summary.isEmpty()) {
-                model.summary = firstMeaningfulLine(normalizedDescription);
-            }
-            if (!normalizedDescription.isEmpty() && !textEquivalent(normalizedDescription, model.summary)) {
-                model.details = normalizedDescription;
-            } else if (!normalizedMessage.isEmpty() && !textEquivalent(normalizedMessage, model.summary)) {
-                model.details = normalizedMessage;
-            }
-        }
-        if (!requestorName.isEmpty()) {
-            const bool duplicateUnlockRequestor = (model.intent == PromptIntent::Unlock) && (requestorName.compare(unlockTarget, Qt::CaseInsensitive) == 0);
-            if (!duplicateUnlockRequestor) {
-                model.requestor = QString("Requested by %1").arg(requestorName);
-            }
-        }
-        if (model.summary.isEmpty() && !model.details.isEmpty()) {
-            const QString normalizedDetails = normalizeDetailText(model.details);
-            const int     newline           = normalizedDetails.indexOf('\n');
-            if (newline == -1) {
-                model.summary = normalizedDetails;
-                model.details.clear();
-            } else {
-                model.summary = normalizedDetails.left(newline).trimmed();
-                model.details = normalizedDetails.mid(newline + 1).trimmed();
-            }
-        }
-        if (!model.summary.isEmpty() && !model.details.isEmpty()) {
-            const QString normalizedDetails = normalizeDetailText(model.details);
-            QStringList   detailLines       = normalizedDetails.split('\n');
-            if (!detailLines.isEmpty() && textEquivalent(detailLines.first(), model.summary)) {
-                detailLines.removeFirst();
-                model.details = detailLines.join("\n").trimmed();
-            }
-            if (textEquivalent(model.summary, model.details)) {
-                model.details.clear();
-            }
-        }
-        if (!infoText.isEmpty() && !textEquivalent(infoText, model.summary) && !textEquivalent(infoText, model.details)) {
-            model.details = model.details.isEmpty() ? infoText : uniqueJoined(QStringList{model.details, infoText});
-        }
-        if (source == "pinentry") {
-            const QString pinPrompt = context.value("message").toString().trimmed();
-            model.prompt            = pinPrompt.isEmpty() ? QString("Passphrase:") : pinPrompt;
-        } else {
-            model.prompt = QString("Password:");
-            if (source == "polkit" && touchHint) {
-                model.prompt             = QString("Press Enter to continue (or wait)");
-                model.allowEmptyResponse = true;
-            }
-        }
-        model.passphrasePrompt = (source == "pinentry") || model.prompt.contains("passphrase", Qt::CaseInsensitive);
-        if (source == "polkit" && touchHint) {
-            model.passphrasePrompt = false;
-        }
-        return model;
+        const bb::fallback::prompt::PromptModelBuilder builder;
+        return builder.build(event);
     }
 
     void FallbackWindow::startIdleExitTimer() {

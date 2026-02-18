@@ -11,11 +11,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network DBus Widgets Test)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network DBus Widgets Test)
 find_package(PkgConfig REQUIRED)
 
 if(NOT MSVC)
     add_compile_options(-Wall -Wextra -Werror=format-security)
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_definitions(_FORTIFY_SOURCE=2)
+    endif()
     add_link_options(-Wl,-z,relro -Wl,-z,now)
 endif()
 
@@ -36,7 +39,7 @@ pkg_check_modules(
   gio-2.0
   json-glib-1.0)
 
-qt_standard_project_setup(REQUIRES 6.5)
+qt_standard_project_setup(REQUIRES 6.4)
 enable_testing()
 
 # Unified bb-auth binary
@@ -71,6 +74,14 @@ qt_add_executable(bb-auth
     src/core/RequestContext.cpp
     src/core/ipc/IpcServer.cpp
 
+    # Provider plumbing
+    src/core/providers/ProviderManifest.cpp
+    src/core/providers/ProviderManifest.hpp
+    src/core/providers/ProviderDiscovery.cpp
+    src/core/providers/ProviderDiscovery.hpp
+    src/core/providers/ProviderLauncher.cpp
+    src/core/providers/ProviderLauncher.hpp
+
     # Managers
     src/core/managers/KeyringManager.cpp
     src/core/managers/KeyringManager.hpp
@@ -102,7 +113,14 @@ target_link_libraries(bb-auth
         PkgConfig::polkit_deps
         PkgConfig::gcr_deps
 )
-target_compile_definitions(bb-auth PRIVATE BB_AUTH_VERSION="${VER}")
+target_compile_definitions(bb-auth
+    PRIVATE
+        BB_AUTH_VERSION="${VER}"
+        BB_AUTH_PROVIDER_SYSTEM_DIR="${CMAKE_INSTALL_FULL_DATADIR}/bb-auth/providers.d")
+
+# Configurable gcr-prompter path
+set(BB_AUTH_GCR_PROMPTER_BINARY "/usr/lib/gcr-prompter" CACHE STRING "Path to the system gcr-prompter binary")
+target_compile_definitions(bb-auth PRIVATE GCR_PROMPTER_BINARY="\\"${BB_AUTH_GCR_PROMPTER_BINARY}\\"")
 
 include(GNUInstallDirs)
 
@@ -145,19 +163,44 @@ target_link_libraries(bb-auth-fallback
 
 install(TARGETS bb-auth-fallback
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
+
 qt_add_executable(bb-auth-tests
     tests/test_session_info.cpp
     tests/test_fallback_touch_model.cpp
+    tests/test_fallback_window_states.cpp
     tests/test_agent_routing.cpp
+    tests/test_ipc_contract.cpp
+    tests/test_provider_manifest.cpp
+    tests/test_provider_discovery.cpp
+    tests/test_provider_launcher.cpp
+    tests/test_provider_conformance.cpp
+    tests/test_text_normalize.cpp
+    tests/test_session_store.cpp
+    tests/test_classify_request.cpp
+    tests/test_prompt_extractors.cpp
+    tests/test_request_context.cpp
 
     src/core/Session.cpp
     src/core/Session.hpp
+    src/core/RequestContext.cpp
+    src/core/RequestContext.hpp
     src/core/agent/EventQueue.cpp
     src/core/agent/EventQueue.hpp
     src/core/agent/ProviderRegistry.cpp
     src/core/agent/ProviderRegistry.hpp
     src/core/agent/EventRouter.cpp
     src/core/agent/EventRouter.hpp
+    src/core/agent/SessionStore.cpp
+    src/core/agent/SessionStore.hpp
+    src/core/agent/MessageRouter.cpp
+    src/core/agent/MessageRouter.hpp
+    src/core/ipc/IpcServer.cpp
+    src/core/providers/ProviderManifest.cpp
+    src/core/providers/ProviderManifest.hpp
+    src/core/providers/ProviderDiscovery.cpp
+    src/core/providers/ProviderDiscovery.hpp
+    src/core/providers/ProviderLauncher.cpp
+    src/core/providers/ProviderLauncher.hpp
 
     src/fallback/prompt/TextNormalize.cpp
     src/fallback/prompt/TextNormalize.hpp
@@ -168,6 +211,10 @@ qt_add_executable(bb-auth-tests
     src/fallback/prompt/PromptModel.hpp
     src/fallback/prompt/PromptModelBuilder.cpp
     src/fallback/prompt/PromptModelBuilder.hpp
+    src/fallback/FallbackClient.cpp
+    src/fallback/FallbackClient.hpp
+    src/fallback/FallbackWindow.cpp
+    src/fallback/FallbackWindow.hpp
 )
 
 target_link_libraries(bb-auth-tests
@@ -176,26 +223,36 @@ target_link_libraries(bb-auth-tests
         Qt6::Core
         Qt6::Widgets
         Qt6::Network
+        Qt6::DBus
+        PkgConfig::polkit_deps
 )
 
 add_test(NAME bb-auth-tests COMMAND bb-auth-tests)
+set_tests_properties(bb-auth-tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-bootstrap
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
 
 # Install symlinks for protocol compatibility
 install(CODE "
+    if(\"${CMAKE_INSTALL_LIBEXECDIR}\" MATCHES \"^/\")
+        set(_bb_auth_libexec_dir \"\$ENV{DESTDIR}${CMAKE_INSTALL_LIBEXECDIR}\")
+    else()
+        set(_bb_auth_libexec_dir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}\")
+    endif()
+
     execute_process(
         COMMAND \${CMAKE_COMMAND} -E create_symlink
             bb-auth
             bb-keyring-prompter
-        WORKING_DIRECTORY \$ENV{DESTDIR}\${CMAKE_INSTALL_FULL_LIBEXECDIR}
+        WORKING_DIRECTORY \"\${_bb_auth_libexec_dir}\"
     )
     execute_process(
         COMMAND \${CMAKE_COMMAND} -E create_symlink
             bb-auth
             pinentry-bb
-        WORKING_DIRECTORY \$ENV{DESTDIR}\${CMAKE_INSTALL_FULL_LIBEXECDIR}
+        WORKING_DIRECTORY \"\${_bb_auth_libexec_dir}\"
     )
 ")
 
@@ -216,17 +273,3 @@ install(FILES ${CMAKE_BINARY_DIR}/org.gnome.keyring.SystemPrompter.service
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/bb-auth-migrate.sh
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         RENAME bb-auth-migrate)
-
-# Uninstall target
-add_custom_target(uninstall
-    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth"
-    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-fallback"
-    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-bootstrap"
-    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-keyring-prompter"
-    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBEXECDIR}/pinentry-bb"
-    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_LIBDIR}/systemd/user/bb-auth.service"
-    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_DATADIR}/dbus-1/services/org.bb.auth.service"
-    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_DATADIR}/bb-auth/org.gnome.keyring.SystemPrompter.service"
-    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_INSTALL_FULL_BINDIR}/bb-auth-migrate"
-    COMMENT "Uninstalling bb-auth..."
-)

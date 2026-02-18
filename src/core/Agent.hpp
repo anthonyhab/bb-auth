@@ -16,6 +16,8 @@
 #include "ipc/IpcServer.hpp"
 #include "managers/KeyringManager.hpp"
 #include "managers/PinentryManager.hpp"
+#include "providers/ProviderDiscovery.hpp"
+#include "providers/ProviderLauncher.hpp"
 
 namespace bb {
 
@@ -52,7 +54,7 @@ namespace bb {
         void onPolkitCompleted(bool gainedAuthorization);
 
       public:
-        void        onPolkitRequest(const QString& cookie, const QString& message, const QString& iconName, const QString& actionId, const QString& user,
+        bool        onPolkitRequest(const QString& cookie, const QString& message, const QString& iconName, const QString& actionId, const QString& user,
                                     const PolkitQt1::Details& details);
         void        onSessionRequest(const QString& cookie, const QString& prompt, bool echo);
         void        onSessionComplete(const QString& cookie, bool success);
@@ -61,7 +63,7 @@ namespace bb {
 
         void        emitSessionEvent(const QJsonObject& event);
 
-        void        createSession(const QString& id, Session::Source source, Session::Context ctx);
+        bool        createSession(const QString& id, Session::Source source, Session::Context ctx);
         void        updateSessionPrompt(const QString& id, const QString& prompt, bool echo = false, bool clearError = true);
         void        updateSessionError(const QString& id, const QString& error);
         void        updateSessionPinentryRetry(const QString& id, int curRetry, int maxRetries);
@@ -82,6 +84,8 @@ namespace bb {
         QList<QLocalSocket*>            m_subscribers;
         QTimer                          m_providerMaintenanceTimer;
         QString                         m_socketPath;
+        bb::providers::ProviderLauncher m_providerLauncher;
+        QStringList                     m_providerSearchDirs;
         qint64                          m_lastFallbackLaunchMs = 0;
     };
 

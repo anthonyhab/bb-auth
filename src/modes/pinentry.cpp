@@ -14,11 +14,12 @@
 #include <iostream>
 #include <print>
 #include <string>
+#include <QStringView>
 
 namespace {
 
     // Assuan percent-decoding
-    QString assuanDecode(const QString& input) {
+    QString assuanDecode(QStringView input) {
         QString result;
         result.reserve(input.size());
 
@@ -42,12 +43,17 @@ namespace {
         QString result;
         result.reserve(input.size() * 3);
 
+        static const char hexChars[] = "0123456789ABCDEF";
+
         for (const QChar& ch : input) {
             char c = ch.toLatin1();
             if (c == '%' || c == '\n' || c == '\r') {
-                result += QString("%%%1").arg(static_cast<unsigned char>(c), 2, 16, QChar('0')).toUpper();
+                result.append('%');
+                unsigned char uc = static_cast<unsigned char>(c);
+                result.append(hexChars[(uc >> 4) & 0xF]);
+                result.append(hexChars[uc & 0xF]);
             } else {
-                result += ch;
+                result.append(ch);
             }
         }
         return result;
@@ -178,11 +184,12 @@ namespace {
 
         bool handleCommand(const QString& line) {
             // Split command and argument
-            qsizetype spaceIdx = line.indexOf(' ');
-            QString   cmd      = (spaceIdx > 0) ? line.left(spaceIdx).toUpper() : line.toUpper();
-            QString   arg      = (spaceIdx > 0) ? assuanDecode(line.mid(static_cast<int>(spaceIdx + 1))) : QString();
+            qsizetype   spaceIdx = line.indexOf(' ');
+            QStringView lineView(line);
+            QStringView cmdView = (spaceIdx > 0) ? lineView.left(spaceIdx) : lineView;
+            QString     arg     = (spaceIdx > 0) ? assuanDecode(lineView.mid(spaceIdx + 1)) : QString();
 
-            if (cmd == "BYE") {
+            if (cmdView.compare(u"BYE", Qt::CaseInsensitive) == 0) {
                 if (awaitingTerminalResult) {
                     if (!state.error.isEmpty()) {
                         reportTerminalResult("error", state.error);
@@ -200,68 +207,68 @@ namespace {
                 return false;
             }
 
-            if (cmd == "SETDESC") {
+            if (cmdView.compare(u"SETDESC", Qt::CaseInsensitive) == 0) {
                 state.description = arg;
                 sendOk();
                 return true;
             }
 
-            if (cmd == "SETPROMPT") {
+            if (cmdView.compare(u"SETPROMPT", Qt::CaseInsensitive) == 0) {
                 state.prompt = arg;
                 sendOk();
                 return true;
             }
 
-            if (cmd == "SETTITLE") {
+            if (cmdView.compare(u"SETTITLE", Qt::CaseInsensitive) == 0) {
                 state.title = arg;
                 sendOk();
                 return true;
             }
 
-            if (cmd == "SETERROR") {
+            if (cmdView.compare(u"SETERROR", Qt::CaseInsensitive) == 0) {
                 state.error = arg;
                 sendOk();
                 return true;
             }
 
-            if (cmd == "SETOK") {
+            if (cmdView.compare(u"SETOK", Qt::CaseInsensitive) == 0) {
                 state.okText = arg;
                 sendOk();
                 return true;
             }
 
-            if (cmd == "SETCANCEL") {
+            if (cmdView.compare(u"SETCANCEL", Qt::CaseInsensitive) == 0) {
                 state.cancelText = arg;
                 sendOk();
                 return true;
             }
 
-            if (cmd == "SETNOTOK") {
+            if (cmdView.compare(u"SETNOTOK", Qt::CaseInsensitive) == 0) {
                 state.notOkText = arg;
                 sendOk();
                 return true;
             }
 
-            if (cmd == "SETKEYINFO") {
+            if (cmdView.compare(u"SETKEYINFO", Qt::CaseInsensitive) == 0) {
                 state.keyinfo = arg;
                 sendOk();
                 return true;
             }
 
-            if (cmd == "SETREPEAT") {
+            if (cmdView.compare(u"SETREPEAT", Qt::CaseInsensitive) == 0) {
                 state.repeat = arg;
                 sendOk();
                 return true;
             }
 
-            if (cmd == "OPTION") {
+            if (cmdView.compare(u"OPTION", Qt::CaseInsensitive) == 0) {
                 // Options like "ttyname", "ttytype", "lc-ctype", etc.
                 // We acknowledge but don't use them
                 sendOk();
                 return true;
             }
 
-            if (cmd == "GETINFO") {
+            if (cmdView.compare(u"GETINFO", Qt::CaseInsensitive) == 0) {
                 // Return info about this pinentry
                 if (arg == "pid") {
                     sendData(QString::number(getpid()));
@@ -281,25 +288,25 @@ namespace {
                 return true;
             }
 
-            if (cmd == "GETPIN") {
+            if (cmdView.compare(u"GETPIN", Qt::CaseInsensitive) == 0) {
                 return handleGetPin();
             }
 
-            if (cmd == "CONFIRM") {
+            if (cmdView.compare(u"CONFIRM", Qt::CaseInsensitive) == 0) {
                 return handleConfirm();
             }
 
-            if (cmd == "MESSAGE") {
+            if (cmdView.compare(u"MESSAGE", Qt::CaseInsensitive) == 0) {
                 return handleMessage();
             }
 
-            if (cmd == "RESET") {
+            if (cmdView.compare(u"RESET", Qt::CaseInsensitive) == 0) {
                 state = PinentryState{};
                 sendOk();
                 return true;
             }
 
-            if (cmd == "NOP") {
+            if (cmdView.compare(u"NOP", Qt::CaseInsensitive) == 0) {
                 sendOk();
                 return true;
             }

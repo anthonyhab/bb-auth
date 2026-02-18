@@ -9,7 +9,7 @@
 
 using namespace PolkitQt1::Agent;
 
-CPolkitListener::CPolkitListener(QObject* parent) : Listener(parent) {
+CPolkitListener::CPolkitListener(bb::CAgent* agent, QObject* parent) : Listener(parent), m_agent(agent) {
     ;
 }
 
@@ -58,7 +58,21 @@ void CPolkitListener::initiateAuthentication(const QString& actionId, const QStr
     m_cookieToState.insert(cookie, state);
     m_sessionToState.insert(state->session, state);
 
-    g_pAgent->onPolkitRequest(cookie, message, iconName, actionId, state->selectedUser.toString(), details);
+    if (!m_agent->onPolkitRequest(cookie, message, iconName, actionId, state->selectedUser.toString(), details)) {
+        std::print("> REJECTING: Agent rejected session cookie {} (collision)\n", cookie.toStdString());
+
+        m_cookieToState.remove(cookie);
+        if (state->session) {
+            m_sessionToState.remove(state->session);
+            state->session->deleteLater();
+            state->session = nullptr;
+        }
+
+        result->setError("Duplicate session");
+        result->setCompleted();
+        delete state;
+        return;
+    }
 
     reattempt(state);
 }
@@ -105,7 +119,7 @@ void CPolkitListener::onSessionRequest(const QString& request, bool echo) {
     state->echoOn = echo;
 
     state->requestSent = true;
-    g_pAgent->onSessionRequest(state->cookie, request, echo);
+    m_agent->onSessionRequest(state->cookie, request, echo);
 }
 
 void CPolkitListener::onSessionCompleted(bool gainedAuthorization) {
@@ -120,7 +134,7 @@ void CPolkitListener::onSessionCompleted(bool gainedAuthorization) {
 
     if (!gainedAuthorization) {
         state->errorText = "Authentication failed";
-        g_pAgent->onSessionRetry(state->cookie, state->errorText);
+        m_agent->onSessionRetry(state->cookie, state->errorText);
     }
 
     finishAuth(state);
@@ -135,7 +149,7 @@ void CPolkitListener::onSessionError(const QString& text) {
     std::print("> PKS showError (cookie: {}): {}\n", state->cookie.toStdString(), text.toStdString());
 
     state->errorText = text;
-    g_pAgent->onSessionRetry(state->cookie, text);
+    m_agent->onSessionRetry(state->cookie, text);
 }
 
 void CPolkitListener::onSessionInfo(const QString& text) {
@@ -145,7 +159,7 @@ void CPolkitListener::onSessionInfo(const QString& text) {
         return;
 
     std::print("> PKS showInfo (cookie: {}): {}\n", state->cookie.toStdString(), text.toStdString());
-    g_pAgent->onSessionInfo(state->cookie, text);
+    m_agent->onSessionInfo(state->cookie, text);
 }
 
 void CPolkitListener::finishAuth(SessionState* state) {
@@ -178,7 +192,7 @@ void CPolkitListener::finishAuth(SessionState* state) {
         } else {
             std::print("> finishAuth: Max retries ({}) reached for cookie {}. Failing.\n", SessionState::MAX_AUTH_RETRIES, state->cookie.toStdString());
             state->errorText = "Too many failed attempts";
-            g_pAgent->onSessionRetry(state->cookie, state->errorText);
+            m_agent->onSessionRetry(state->cookie, state->errorText);
         }
     }
 
@@ -193,7 +207,7 @@ void CPolkitListener::finishAuth(SessionState* state) {
     } else
         state->result->setCompleted();
 
-    g_pAgent->onSessionComplete(state->cookie, state->gainedAuth);
+    m_agent->onSessionComplete(state->cookie, state->gainedAuth);
 
     emit completed(state->gainedAuth);
 

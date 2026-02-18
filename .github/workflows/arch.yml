@@ -2,45 +2,69 @@ name: Arch Linux Build
 
 on:
   push:
-    branches: [ main, master ]
   pull_request:
-    branches: [ main, master ]
 
 jobs:
-  build:
+  core-only:
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gnome-keyring json-glib
+          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gcr-4 gnome-keyring json-glib
 
-      - name: Build with CMake
+      - name: Prepare build user
         run: |
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr
-          cmake --build build
+          useradd -m builder
+          chown -R builder:builder .
 
-      - name: Run tests
+      - name: Build
         run: |
-          export QT_QPA_PLATFORM=offscreen
-          ctest --test-dir build --output-on-failure
+          # makepkg cannot run as root
+          # core-plus-provider job already runs full test suite against this checkout;
+          # keep core-only as packaging smoke to avoid VCS PKGBUILD check() drift.
+          su builder -s /bin/bash -c "makepkg -s --noconfirm --nocheck"
 
-      - name: Test PKGBUILD
-        run: |
-          # Verify PKGBUILD can be sourced without errors
-          bash -n PKGBUILD
-          
-      - name: Install and verify
-        run: |
-          cmake --install build --prefix /tmp/install-test
-          ls -la /tmp/install-test/libexec/
-          ls -la /tmp/install-test/lib/systemd/user/ || echo "No systemd files"
-          ls -la /tmp/install-test/share/dbus-1/services/ || echo "No dbus services"
+  core-plus-provider:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm git cmake qt6-base polkit-qt6 polkit gcr-4 gnome-keyring json-glib python
+
+      - name: Build and test core
+        run: |
+          cmake -S . -B build-ci -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-ci -j"$(nproc)"
+          ctest --test-dir build-ci --output-on-failure
+
+      - name: Validate external provider template
+        run: |
+          set -euo pipefail
+          python -m py_compile examples/provider-template/provider.py
+          python examples/provider-template/provider.py --help >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("examples/provider-template/provider.json").read_text(encoding="utf-8"))
+          required = {"id", "name", "kind", "priority", "exec", "autostart"}
+          missing = required - manifest.keys()
+          if missing:
+              raise SystemExit(f"missing manifest keys: {sorted(missing)}")
+          if not isinstance(manifest["capabilities"], list):
+              raise SystemExit("capabilities must be an array")
+          if manifest["id"] != "provider-template":
+              raise SystemExit("unexpected template id")
+          PY
