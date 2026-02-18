@@ -38,7 +38,11 @@ Linux desktop authentication that stays out of your way.
 yay -S bb-auth-git
 ```
 
-`bb-auth-git` defaults to `-DBB_AUTH_GTK_FALLBACK=AUTO`: GTK fallback is built only when `gtk4` is available in the build environment.
+`bb-auth-git` defaults to `-DBB_AUTH_GTK_FALLBACK=OFF` for deterministic minimal builds.
+To include GTK fallback in the package build:
+```bash
+BB_AUTH_GTK_FALLBACK=ON makepkg -si
+```
 
 **Nix**:
 ```bash
@@ -186,6 +190,8 @@ BB_AUTH_GTK_FALLBACK=OFF makepkg -si
 ### Drop-in providers (`providers.d`)
 
 Provider executables are discovered through manifest files and launched automatically when needed.
+Providers are regular executables, so they can be written in C/C++, Rust, Go, Python, shell, etc.
+You can add providers after install without rebuilding `bb-auth`.
 
 Search order (first wins by manifest `id`):
 
@@ -213,6 +219,23 @@ Validation rules:
 - `exec`: absolute path or basename resolvable in `PATH`
 
 If manifests are invalid or missing, daemon falls back to the existing Qt fallback path. This rollout is additive and backward-compatible.
+
+Provider binaries and manifests can be installed later (no `bb-auth` rebuild required), for example:
+```bash
+mkdir -p ~/.local/libexec ~/.local/share/bb-auth/providers.d
+install -m 0755 ./my-provider ~/.local/libexec/my-provider
+cat > ~/.local/share/bb-auth/providers.d/my-provider.json <<'JSON'
+{
+  "id": "my-provider",
+  "name": "My Provider",
+  "kind": "custom",
+  "priority": 20,
+  "exec": "/home/your-user/.local/libexec/my-provider",
+  "autostart": true
+}
+JSON
+systemctl --user restart bb-auth.service
+```
 
 ### Migration from noctalia-auth
 
