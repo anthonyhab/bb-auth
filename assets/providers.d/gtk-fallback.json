@@ -1,9 +1,0 @@
-{
-  "id": "gtk-fallback",
-  "name": "GTK Fallback Provider",
-  "kind": "gtk-fallback",
-  "priority": 8,
-  "exec": "bb-auth-gtk-fallback",
-  "autostart": true,
-  "capabilities": ["password", "cancel", "status"]
-}

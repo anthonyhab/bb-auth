@@ -157,7 +157,7 @@ Packaging:
 
 ## Near-Term Backlog (next 2-3 sessions)
 
-- [ ] Refactor out in-tree GTK provider code into external reference package/repo.
+- [x] Refactor out in-tree GTK provider code from core repo (external provider template now documented).
 - [x] Add `docs/PROVIDER_PACKAGING.md`.
 - [x] Add test target for provider conformance.
 - [x] Add CI job that validates "core-only" installation path.
@@ -185,3 +185,4 @@ Do not:
 - 2026-02-18: Removed in-tree GTK provider build/install from core; core packaging/CI now validates minimal Qt-first architecture.
 - 2026-02-18: Added provider conformance test suite and external provider packaging guide.
 - 2026-02-18: Added external provider template and Arch CI split for core-only plus drop-in provider template validation.
+- 2026-02-18: Removed remaining in-tree GTK provider source/assets from core repository.
