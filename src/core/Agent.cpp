@@ -388,7 +388,7 @@ void CAgent::emitSessionEvent(const QJsonObject& event) {
     m_eventRouter.route(event, m_subscribers, [this](QLocalSocket* socket, const QJsonObject& routedEvent) { m_ipcServer.sendJson(socket, routedEvent); });
 }
 
-void CAgent::onPolkitRequest(const QString& cookie, const QString& message, [[maybe_unused]] const QString& iconName, const QString& actionId, const QString& user,
+bool CAgent::onPolkitRequest(const QString& cookie, const QString& message, [[maybe_unused]] const QString& iconName, const QString& actionId, const QString& user,
                              const PolkitQt1::Details& details) {
     qDebug() << "POLKIT REQUEST" << cookie;
 
@@ -416,7 +416,12 @@ void CAgent::onPolkitRequest(const QString& cookie, const QString& message, [[ma
         ctx.requestor.fallbackKey    = "unknown";
     }
 
-    createSession(cookie, bb::Session::Source::Polkit, ctx);
+    if (!createSession(cookie, bb::Session::Source::Polkit, ctx)) {
+        qWarning() << "Rejected polkit request due to session collision:" << cookie;
+        return false;
+    }
+
+    return true;
 }
 
 void CAgent::onSessionRequest(const QString& cookie, const QString& prompt, bool echo) {
@@ -465,6 +470,7 @@ void CAgent::onPolkitCompleted([[maybe_unused]] bool gainedAuthorization) {}
 bool CAgent::createSession(const QString& id, Session::Source source, Session::Context ctx) {
     const auto createdEvent = m_sessionStore.createSession(id, source, ctx);
     if (!createdEvent) {
+        qWarning() << "createSession: duplicate session id:" << id;
         return false;
     }
     emitSessionEvent(*createdEvent);

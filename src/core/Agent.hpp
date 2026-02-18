@@ -54,7 +54,7 @@ namespace bb {
         void onPolkitCompleted(bool gainedAuthorization);
 
       public:
-        void        onPolkitRequest(const QString& cookie, const QString& message, const QString& iconName, const QString& actionId, const QString& user,
+        bool        onPolkitRequest(const QString& cookie, const QString& message, const QString& iconName, const QString& actionId, const QString& user,
                                     const PolkitQt1::Details& details);
         void        onSessionRequest(const QString& cookie, const QString& prompt, bool echo);
         void        onSessionComplete(const QString& cookie, bool success);

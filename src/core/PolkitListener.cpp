@@ -58,7 +58,21 @@ void CPolkitListener::initiateAuthentication(const QString& actionId, const QStr
     m_cookieToState.insert(cookie, state);
     m_sessionToState.insert(state->session, state);
 
-    m_agent->onPolkitRequest(cookie, message, iconName, actionId, state->selectedUser.toString(), details);
+    if (!m_agent->onPolkitRequest(cookie, message, iconName, actionId, state->selectedUser.toString(), details)) {
+        std::print("> REJECTING: Agent rejected session cookie {} (collision)\n", cookie.toStdString());
+
+        m_cookieToState.remove(cookie);
+        if (state->session) {
+            m_sessionToState.remove(state->session);
+            state->session->deleteLater();
+            state->session = nullptr;
+        }
+
+        result->setError("Duplicate session");
+        result->setCompleted();
+        delete state;
+        return;
+    }
 
     reattempt(state);
 }
