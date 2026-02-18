@@ -8,11 +8,13 @@ url="https://github.com/anthonyhab/bb-auth"
 license=('BSD-3-Clause')
 depends=(
     'qt6-base'
-    'gtk4'
     'polkit-qt6'
     'polkit'
     'gcr-4'
     'json-glib'
+)
+optdepends=(
+    'gtk4: build with BB_AUTH_GTK_FALLBACK=ON (or AUTO with gtk4 installed) to include GTK fallback provider'
 )
 makedepends=(
     'git'
@@ -31,9 +33,11 @@ pkgver() {
 
 build() {
     cd "$pkgname"
+    local gtk_fallback_mode="${BB_AUTH_GTK_FALLBACK:-AUTO}"
     cmake -S . -B build \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/usr
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DBB_AUTH_GTK_FALLBACK="$gtk_fallback_mode"
     cmake --build build
 }
 

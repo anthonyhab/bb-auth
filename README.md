@@ -38,6 +38,8 @@ Linux desktop authentication that stays out of your way.
 yay -S bb-auth-git
 ```
 
+`bb-auth-git` defaults to `-DBB_AUTH_GTK_FALLBACK=AUTO`: GTK fallback is built only when `gtk4` is available in the build environment.
+
 **Nix**:
 ```bash
 nix profile install github:anthonyhab/bb-auth#bb-auth
@@ -166,6 +168,19 @@ Example override:
 [Service]
 Environment=BB_AUTH_CONFLICT_MODE=warn
 Environment=BB_AUTH_PROVIDER_DIR=%h/.config/bb-auth/providers.d
+```
+
+### GTK fallback build mode
+
+Use CMake option `BB_AUTH_GTK_FALLBACK`:
+
+- `AUTO` (default): build GTK fallback only if `gtk4` is found.
+- `ON`: require and build GTK fallback (configure fails if missing).
+- `OFF`: never build GTK fallback.
+
+AUR builds can override with:
+```bash
+BB_AUTH_GTK_FALLBACK=OFF makepkg -si
 ```
 
 ### Drop-in providers (`providers.d`)
