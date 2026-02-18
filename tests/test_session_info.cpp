@@ -4,7 +4,9 @@
 #include <QApplication>
 
 int runFallbackWindowTouchModelTests(int argc, char** argv);
+int runFallbackWindowStateTests(int argc, char** argv);
 int runAgentRoutingTests(int argc, char** argv);
+int runIpcContractTests(int argc, char** argv);
 int runProviderManifestTests(int argc, char** argv);
 int runProviderDiscoveryTests(int argc, char** argv);
 int runProviderLauncherTests(int argc, char** argv);
@@ -76,6 +78,7 @@ int main(int argc, char** argv) {
     const int       sessionResult        = QTest::qExec(&sessionInfoTest, argc, argv);
     const int       routingResult        = runAgentRoutingTests(argc, argv);
     const int       fallbackResult       = runFallbackWindowTouchModelTests(argc, argv);
+    const int       fallbackStateResult  = runFallbackWindowStateTests(argc, argv);
     const int       storeResult          = runSessionStoreTests(argc, argv);
     const int       classifyResult       = runClassifyRequestTests(argc, argv);
     const int       extractorsResult     = runPromptExtractorsTests(argc, argv);
@@ -85,6 +88,7 @@ int main(int argc, char** argv) {
     const int       discoveryResult      = runProviderDiscoveryTests(argc, argv);
     const int       launcherResult       = runProviderLauncherTests(argc, argv);
     const int       conformanceResult    = runProviderConformanceTests(argc, argv);
+    const int       ipcContractResult    = runIpcContractTests(argc, argv);
     if (sessionResult != 0) {
         return sessionResult;
     }
@@ -93,6 +97,9 @@ int main(int argc, char** argv) {
     }
     if (fallbackResult != 0) {
         return fallbackResult;
+    }
+    if (fallbackStateResult != 0) {
+        return fallbackStateResult;
     }
     if (storeResult != 0) {
         return storeResult;
@@ -118,7 +125,10 @@ int main(int argc, char** argv) {
     if (launcherResult != 0) {
         return launcherResult;
     }
-    return conformanceResult;
+    if (conformanceResult != 0) {
+        return conformanceResult;
+    }
+    return ipcContractResult;
 }
 
 #include "test_session_info.moc"

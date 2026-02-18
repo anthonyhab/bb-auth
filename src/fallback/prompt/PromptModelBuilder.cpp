@@ -44,6 +44,51 @@ namespace bb::fallback::prompt {
             return identity.trimmed();
         }
 
+        QString humanizeActionId(QString actionId) {
+            actionId = actionId.trimmed();
+            if (actionId.isEmpty()) {
+                return QString();
+            }
+
+            const qsizetype lastDot = actionId.lastIndexOf('.');
+            if (lastDot >= 0 && (lastDot + 1) < actionId.size()) {
+                actionId = actionId.mid(lastDot + 1);
+            }
+
+            actionId.replace('-', ' ');
+            actionId.replace('_', ' ');
+            actionId.replace('/', ' ');
+            actionId = actionId.simplified();
+            if (actionId.isEmpty()) {
+                return QString();
+            }
+
+            QStringList words = actionId.split(' ', Qt::SkipEmptyParts);
+            for (QString& word : words) {
+                word[0] = word[0].toUpper();
+            }
+            return words.join(" ");
+        }
+
+        bool isGenericAuthSummary(const QString& summary) {
+            const QString normalized = normalizeCompareText(summary);
+            if (normalized.isEmpty()) {
+                return true;
+            }
+
+            static const QStringList genericSummaries = {
+                QStringLiteral("authentication is required"),
+                QStringLiteral("authentication required"),
+                QStringLiteral("authorization is required"),
+                QStringLiteral("authorization required"),
+                QStringLiteral("authenticate to continue"),
+                QStringLiteral("authentication is required to continue"),
+                QStringLiteral("authorization is required to continue"),
+            };
+
+            return genericSummaries.contains(normalized);
+        }
+
     } // namespace
 
     PromptDisplayModel PromptModelBuilder::build(const QJsonObject& event) const {
@@ -54,11 +99,16 @@ namespace bb::fallback::prompt {
         const QString      message               = context.value("message").toString();
         const QString      description           = context.value("description").toString();
         const QString      requestorName         = requestor.value("name").toString().trimmed();
+        const qint64       requestorPid          = requestor.value("pid").toInteger();
+        const QString      actionId              = context.value("actionId").toString().trimmed();
+        const QString      actionSummary         = (source == "polkit") ? humanizeActionId(actionId) : QString();
+        const QString      actionUser            = context.value("user").toString().trimmed();
         const QString      infoText              = normalizeDetailText(event.value("info").toString());
+        const QString      livePromptText        = normalizeDetailText(event.value("prompt").toString());
         const QString      normalizedMessage     = normalizeDetailText(message);
         const QString      normalizedDescription = normalizeDetailText(description);
         const QString      detailText            = (normalizedDescription + " " + normalizedMessage).toLower();
-        const QString      authHintText          = (detailText + " " + infoText).toLower();
+        const QString      authHintText          = (detailText + " " + infoText + " " + livePromptText).toLower();
         const QString      commandName           = (source == "polkit") ? extractCommandName(message) : QString();
         QString            unlockTarget          = (source == "polkit" || source == "keyring") ? extractUnlockTargetFromContext(context) : QString();
         const bool         fingerprintHint       = looksLikeFingerprintPrompt(authHintText);
@@ -158,12 +208,15 @@ namespace bb::fallback::prompt {
         if (!requestorName.isEmpty()) {
             const bool duplicateUnlockRequestor = (model.intent == PromptIntent::Unlock) && (requestorName.compare(unlockTarget, Qt::CaseInsensitive) == 0);
             if (!duplicateUnlockRequestor) {
-                model.requestor = QString("Requested by %1").arg(requestorName);
+                const bool weakIdentity = (source == "polkit") && (requestorName.compare("unknown", Qt::CaseInsensitive) == 0) && (requestorPid > 0);
+                model.requestor         = weakIdentity ? QString("Requested by process %1").arg(requestorPid) : QString("Requested by %1").arg(requestorName);
             }
+        } else if ((source == "polkit") && (requestorPid > 0)) {
+            model.requestor = QString("Requested by process %1").arg(requestorPid);
         }
         if (model.summary.isEmpty() && !model.details.isEmpty()) {
             const QString normalizedDetails = normalizeDetailText(model.details);
-            const int     newline           = normalizedDetails.indexOf('\n');
+            const qsizetype newline         = normalizedDetails.indexOf('\n');
             if (newline == -1) {
                 model.summary = normalizedDetails;
                 model.details.clear();
@@ -186,8 +239,30 @@ namespace bb::fallback::prompt {
         if (!infoText.isEmpty() && !textEquivalent(infoText, model.summary) && !textEquivalent(infoText, model.details)) {
             model.details = model.details.isEmpty() ? infoText : uniqueJoined(QStringList{model.details, infoText});
         }
+        if (source == "polkit") {
+            if (isGenericAuthSummary(model.summary) && !actionSummary.isEmpty()) {
+                model.summary = actionSummary;
+            }
+
+            QStringList actionLines;
+            if (!actionSummary.isEmpty()) {
+                actionLines << QString("Action: %1").arg(actionSummary);
+            }
+            if (!actionId.isEmpty() && actionId.compare(actionSummary, Qt::CaseInsensitive) != 0) {
+                actionLines << QString("Policy: %1").arg(actionId);
+            }
+            if (!actionUser.isEmpty()) {
+                actionLines << QString("Authenticate as %1").arg(actionUser);
+            }
+
+            const QString actionDetails = uniqueJoined(actionLines);
+            if (!actionDetails.isEmpty()) {
+                model.details = model.details.isEmpty() ? actionDetails : uniqueJoined(QStringList{model.details, actionDetails});
+            }
+        }
         if (source == "pinentry") {
-            const QString pinPrompt = context.value("message").toString().trimmed();
+            const QString eventPrompt = event.value("prompt").toString().trimmed();
+            const QString pinPrompt   = eventPrompt.isEmpty() ? context.value("message").toString().trimmed() : eventPrompt;
             model.prompt            = pinPrompt.isEmpty() ? QString("Passphrase:") : pinPrompt;
         } else {
             model.prompt = QString("Password:");

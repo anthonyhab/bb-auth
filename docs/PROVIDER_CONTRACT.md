@@ -1,6 +1,6 @@
 # Provider Contract (IPC v2.0)
 
-Status: lock candidate (2026-02-18)
+Status: locked (2026-02-18)
 
 This document defines the runtime contract for external UI providers that integrate with `bb-auth`.
 Any executable can be a provider as long as it follows this protocol.
@@ -224,6 +224,7 @@ Generic replies:
 Contract-level checks are implemented in:
 
 - `tests/test_provider_conformance.cpp`
+- `tests/test_ipc_contract.cpp`
 - `tests/test_agent_routing.cpp`
 - `tests/test_provider_manifest.cpp`
 - `tests/test_provider_discovery.cpp`
@@ -238,10 +239,13 @@ Current explicit coverage includes:
 - stale-provider pruning after timeout
 - active-provider authorization boundary
 - session/non-session routing behavior
+- invalid JSON and missing `type` framing errors
+- unknown message type error behavior
+- oversized buffered input disconnect behavior
 
 ## 14. Lock checklist
 
-Before marking this contract as locked:
+Checklist for keeping this contract locked:
 
 1. All conformance tests MUST pass in CI.
 2. Core-only and provider-template CI paths MUST pass.
@@ -250,4 +254,4 @@ Before marking this contract as locked:
    - compatibility impact statement
    - conformance test updates
 
-When this checklist is consistently satisfied, status can be moved from `lock candidate` to `locked`.
+If this checklist is no longer satisfied, status SHOULD revert to `lock candidate` until resolved.

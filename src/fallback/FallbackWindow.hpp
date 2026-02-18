@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FallbackClient.hpp"
+#include "prompt/PromptModel.hpp"
 
 #include <QWidget>
 
@@ -23,27 +24,18 @@ namespace bb {
         void closeEvent(QCloseEvent* event) override;
 
       private:
-        enum class PromptIntent {
-            Generic,
-            Unlock,
-            RunCommand,
-            OpenPgp,
-            Fingerprint,
-            Fido2
-        };
-
-        struct PromptDisplayModel {
-            PromptIntent intent = PromptIntent::Generic;
-            QString      title;
-            QString      summary;
-            QString      requestor;
-            QString      details;
-            QString      prompt;
-            bool         passphrasePrompt   = false;
-            bool         allowEmptyResponse = false;
+        using PromptIntent       = bb::fallback::prompt::PromptIntent;
+        using PromptDisplayModel = bb::fallback::prompt::PromptDisplayModel;
+        enum class PendingAction {
+            None,
+            Submit,
+            Cancel
         };
 
         void               setBusy(bool busy);
+        void               handleCancelRequest();
+        void               startPendingAction(PendingAction action);
+        void               clearPendingAction();
         void               clearSession();
         void               setErrorText(const QString& text);
         void               setStatusText(const QString& text);
@@ -81,9 +73,13 @@ namespace bb {
         bool               m_confirmOnly        = false;
         bool               m_busy               = false;
         bool               m_allowEmptyResponse = false;
+        QString            m_currentSource;
+        QJsonObject        m_currentContext;
+        PendingAction      m_pendingAction = PendingAction::None;
 
         // Idle exit timer - process exits when hidden with no active session
         QTimer* m_idleExitTimer = nullptr;
+        QTimer* m_actionTimeoutTimer = nullptr;
 
         void    startIdleExitTimer();
         void    stopIdleExitTimer();

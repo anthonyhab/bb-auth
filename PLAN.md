@@ -72,7 +72,7 @@ Goal: make third-party provider integration safe and easy.
 
 Tasks:
 
-- [ ] Version and freeze provider protocol contract (`docs/PROVIDER_CONTRACT.md`) (lock-candidate draft complete; awaiting final review).
+- [x] Version and freeze provider protocol contract (`docs/PROVIDER_CONTRACT.md`) (locked at IPC v2.0 with explicit framing/error conformance checks).
 - [x] Add provider conformance test harness (initial coverage for discovery, registration, priority, and authorization boundaries).
 - [x] Add a minimal external-provider template (single binary + manifest).
 - [x] Add provider packaging guide for Arch/Nix/manual installs.
@@ -89,10 +89,10 @@ Goal: polished, trustable prompts with clear context and low friction.
 
 Tasks:
 
-- [ ] Standardize visual language and copy across polkit/keyring/pinentry.
-- [ ] Improve requestor identity and action clarity.
-- [ ] Tighten error, cancel, retry, and timeout UX states.
-- [ ] Add accessibility checks (keyboard-only flow, scaling, contrast).
+- [x] Standardize visual language and copy across polkit/keyring/pinentry.
+- [x] Improve requestor identity and action clarity.
+- [x] Tighten error, cancel, retry, and timeout UX states.
+- [x] Add accessibility checks (keyboard-only flow, scaling, contrast).
 - [ ] Add UX snapshot tests and flow regression tests.
 
 Exit criteria:
@@ -187,3 +187,9 @@ Do not:
 - 2026-02-18: Added external provider template and Arch CI split for core-only plus drop-in provider template validation.
 - 2026-02-18: Removed remaining in-tree GTK provider source/assets from core repository.
 - 2026-02-18: Reworked provider contract into lock-candidate spec and expanded conformance coverage for heartbeat/tie-break/stale-prune behavior.
+- 2026-02-18: Locked provider contract at IPC v2.0 and added IPC conformance tests for invalid JSON, missing type, unknown type, and oversized buffered input disconnects.
+- 2026-02-18: Unified fallback prompt copy/rendering through shared prompt-model logic (polkit/keyring/pinentry) and added source-level model regression tests.
+- 2026-02-18: Improved fallback requestor/action clarity by surfacing polkit action context (`actionId`/user), strengthening weak requestor identity display, and adding model tests.
+- 2026-02-18: Tightened fallback error/cancel/retry/timeout UX with pending-action timeouts, pinentry retry status copy, and closed-error auto-dismiss coverage.
+- 2026-02-18: Added keyboard-first fallback UX checks (Enter submit, keyboard cancel activation, tab-order traversal where supported) and explicit pending-action focus recovery.
+- 2026-02-18: Completed fallback accessibility checks by hardening keyboard-only cancel recovery during submit-pending, switching UI text styling to theme-aware palette defaults for contrast resilience, and adding scaling/contrast regression tests.

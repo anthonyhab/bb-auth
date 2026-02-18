@@ -167,7 +167,9 @@ install(TARGETS bb-auth-fallback
 qt_add_executable(bb-auth-tests
     tests/test_session_info.cpp
     tests/test_fallback_touch_model.cpp
+    tests/test_fallback_window_states.cpp
     tests/test_agent_routing.cpp
+    tests/test_ipc_contract.cpp
     tests/test_provider_manifest.cpp
     tests/test_provider_discovery.cpp
     tests/test_provider_launcher.cpp
@@ -190,6 +192,9 @@ qt_add_executable(bb-auth-tests
     src/core/agent/EventRouter.hpp
     src/core/agent/SessionStore.cpp
     src/core/agent/SessionStore.hpp
+    src/core/agent/MessageRouter.cpp
+    src/core/agent/MessageRouter.hpp
+    src/core/ipc/IpcServer.cpp
     src/core/providers/ProviderManifest.cpp
     src/core/providers/ProviderManifest.hpp
     src/core/providers/ProviderDiscovery.cpp
@@ -206,6 +211,10 @@ qt_add_executable(bb-auth-tests
     src/fallback/prompt/PromptModel.hpp
     src/fallback/prompt/PromptModelBuilder.cpp
     src/fallback/prompt/PromptModelBuilder.hpp
+    src/fallback/FallbackClient.cpp
+    src/fallback/FallbackClient.hpp
+    src/fallback/FallbackWindow.cpp
+    src/fallback/FallbackWindow.hpp
 )
 
 target_link_libraries(bb-auth-tests
