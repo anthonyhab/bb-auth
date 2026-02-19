@@ -12,6 +12,7 @@
 #include <QLabel>
 #include <QKeySequence>
 #include <QLineEdit>
+#include <QLoggingCategory>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScreen>
@@ -23,6 +24,27 @@
 #include <QWindow>
 
 namespace {
+    bool fallbackGeometryDebugEnabled() {
+        static const int enabled = qEnvironmentVariableIntValue("BB_AUTH_FALLBACK_DEBUG_GEOMETRY");
+        return enabled > 0;
+    }
+
+    void logFallbackGeometry(const char* phase, const QWidget* widget, const QWidget* contentWidget, const QWindow* window) {
+        if (!fallbackGeometryDebugEnabled() || !widget) {
+            return;
+        }
+
+        const QSize  widgetSize  = widget->size();
+        const QRect  contentRect = contentWidget ? contentWidget->geometry() : QRect();
+        const QSize  windowSize  = window ? window->size() : QSize();
+        const QRect  frameGeom   = window ? window->frameGeometry() : QRect();
+        const QString platform   = QGuiApplication::platformName();
+        qWarning().nospace() << "[fallback-geo] phase=" << phase << " platform=" << platform << " widget=" << widgetSize.width() << "x"
+                             << widgetSize.height() << " contentRect=" << contentRect.x() << "," << contentRect.y() << " " << contentRect.width() << "x"
+                             << contentRect.height() << " window=" << windowSize.width() << "x" << windowSize.height() << " frame=" << frameGeom.x() << ","
+                             << frameGeom.y() << " " << frameGeom.width() << "x" << frameGeom.height();
+    }
+
     QPair<QString, bool> collapseDetailText(const QString& text, int maxLines, int maxChars) {
         const QString normalizedText = bb::fallback::prompt::normalizeDetailText(text);
         if (normalizedText.isEmpty()) {
@@ -79,6 +101,15 @@ namespace bb {
         setWindowTitle("Authentication Required");
         setObjectName("BBAuthFallback");
         setWindowFlags(Qt::Window | Qt::WindowTitleHint | Qt::WindowCloseButtonHint);
+        setAutoFillBackground(true);
+        setAttribute(Qt::WA_StyledBackground, true);
+        QPalette windowPalette = palette();
+        QColor   windowColor   = windowPalette.color(QPalette::Window);
+        if (windowColor.alpha() < 255) {
+            windowColor.setAlpha(255);
+            windowPalette.setColor(QPalette::Window, windowColor);
+            setPalette(windowPalette);
+        }
         configureSizingForIntent(PromptIntent::Generic);
         resize(m_baseWidth, m_baseHeight);
 
@@ -87,12 +118,14 @@ namespace bb {
         rootLayout->setSpacing(0);
 
         m_contentWidget = new QWidget(this);
-        m_contentWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
-        m_contentWidget->setMaximumWidth(680);
-        rootLayout->addWidget(m_contentWidget, 0);
+        m_contentWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        m_contentWidget->setAutoFillBackground(true);
+        m_contentWidget->setAttribute(Qt::WA_StyledBackground, true);
+        rootLayout->addWidget(m_contentWidget, 1);
         auto* layout = new QVBoxLayout(m_contentWidget);
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(0);
+        layout->setAlignment(Qt::AlignTop);
         auto* headerLayout = new QVBoxLayout();
         headerLayout->setContentsMargins(0, 0, 0, 0);
         headerLayout->setSpacing(10);
@@ -175,7 +208,7 @@ namespace bb {
         layout->addLayout(headerLayout);
         layout->addSpacing(12);
         layout->addLayout(promptLayout);
-        layout->addStretch(1);
+        layout->addSpacing(14);
         layout->addLayout(buttonRow);
 
         // Keep keyboard traversal deterministic for input-only operation.
@@ -485,18 +518,29 @@ namespace bb {
 
     void FallbackWindow::showEvent(QShowEvent* event) {
         QWidget::showEvent(event);
+        logFallbackGeometry("showEvent:beforeSync", this, m_contentWidget, windowHandle());
+        syncToCompositorSize();
+        logFallbackGeometry("showEvent:afterSync", this, m_contentWidget, windowHandle());
 
         // Wayland compositors can apply initial/tiled geometry after map; run
         // multiple fit passes to converge without requiring user interaction.
         scheduleEnsureContentFits(0);
         scheduleEnsureContentFits(40);
         scheduleEnsureContentFits(140);
+        QTimer::singleShot(0, this, [this]() { syncToCompositorSize(); });
+        QTimer::singleShot(120, this, [this]() { syncToCompositorSize(); });
+        QTimer::singleShot(260, this, [this]() { syncToCompositorSize(); });
     }
 
     void FallbackWindow::resizeEvent(QResizeEvent* event) {
         QWidget::resizeEvent(event);
+        logFallbackGeometry("resizeEvent:beforeSync", this, m_contentWidget, windowHandle());
+        syncToCompositorSize();
+        logFallbackGeometry("resizeEvent:afterSync", this, m_contentWidget, windowHandle());
         if (isVisible()) {
             scheduleEnsureContentFits(0);
+            scheduleEnsureContentFits(90);
+            scheduleEnsureContentFits(260);
         }
     }
 
@@ -664,39 +708,44 @@ namespace bb {
         const int      availableWidth  = screen ? qMax(320, screen->availableGeometry().width() - 32) : 680;
         const int      availableHeight = screen ? qMax(220, screen->availableGeometry().height() - 32) : 640;
 
-        const int maxWidth  = qMin(680, availableWidth);
-        const int maxHeight = qMin(640, availableHeight);
-        const int minWidth  = qMin(m_minWidth, maxWidth);
-        const int minHeight = qMin(m_minHeight, maxHeight);
+        const int minWidth  = qMin(m_minWidth, availableWidth);
+        const int minHeight = qMin(m_minHeight, availableHeight);
 
-        const int widthForHeight = qBound(minWidth, qMax(width(), m_baseWidth), maxWidth);
+        const int softMaxWidth  = qMin(680, availableWidth);
+        const int softMaxHeight = qMin(640, availableHeight);
+        const int widthForHeight = qBound(minWidth, qMax(width(), m_baseWidth), softMaxWidth);
         const int currentContentWidth = qMax(320, widthForHeight - left - right);
         int       requiredContentHeight = m_contentWidget->sizeHint().height();
         int       requiredContentWidth  = m_contentWidget->sizeHint().width();
 
         if (contentLayout) {
+            const int layoutSizeHintHeight = contentLayout->sizeHint().height();
+            requiredContentHeight          = layoutSizeHintHeight;
             if (contentLayout->hasHeightForWidth()) {
-                requiredContentHeight = contentLayout->heightForWidth(currentContentWidth);
-            } else {
-                requiredContentHeight = contentLayout->sizeHint().height();
+                const int heightForWidth = contentLayout->heightForWidth(currentContentWidth);
+                if (heightForWidth > 0 && heightForWidth < (QWIDGETSIZE_MAX / 2)) {
+                    requiredContentHeight = heightForWidth;
+                }
             }
 
             requiredContentWidth = contentLayout->sizeHint().width();
         }
 
-        const int baselineWidth = qBound(minWidth, m_baseWidth, maxWidth);
-        const int targetWidth   = qBound(minWidth, qMax(baselineWidth, requiredContentWidth + left + right), maxWidth);
-        const int targetHeight  = qBound(minHeight, requiredContentHeight + top + bottom + 8, maxHeight);
+        const int baselineWidth = qBound(minWidth, m_baseWidth, softMaxWidth);
+        const int targetWidth   = qBound(minWidth, qMax(baselineWidth, requiredContentWidth + left + right), softMaxWidth);
+        const int targetHeight  = qBound(minHeight, requiredContentHeight + top + bottom + 8, softMaxHeight);
 
         if (minimumWidth() != minWidth || minimumHeight() != minHeight) {
             setMinimumSize(minWidth, minHeight);
         }
-        if (maximumWidth() != maxWidth || maximumHeight() != maxHeight) {
-            setMaximumSize(maxWidth, maxHeight);
+        if (isVisible()) {
+            return;
         }
+
         if (targetWidth != width() || targetHeight != height()) {
             resize(targetWidth, targetHeight);
         }
+        logFallbackGeometry("ensureContentFits", this, m_contentWidget, windowHandle());
     }
 
     void FallbackWindow::scheduleEnsureContentFits(int delayMs) {
@@ -713,6 +762,34 @@ namespace bb {
         }
 
         QTimer::singleShot(delayMs, this, [this]() { ensureContentFits(); });
+    }
+
+    void FallbackWindow::syncToCompositorSize() {
+        if (m_syncingToCompositor) {
+            return;
+        }
+
+        QWindow* handle = windowHandle();
+        if (!handle) {
+            return;
+        }
+
+        const QSize compositorSize = handle->size();
+        if (!compositorSize.isValid() || compositorSize.width() <= 0 || compositorSize.height() <= 0) {
+            return;
+        }
+
+        if (size() == compositorSize) {
+            return;
+        }
+
+        m_syncingToCompositor = true;
+        if (fallbackGeometryDebugEnabled()) {
+            qWarning().nospace() << "[fallback-geo] sync resize " << size().width() << "x" << size().height() << " -> " << compositorSize.width() << "x"
+                                 << compositorSize.height();
+        }
+        resize(compositorSize);
+        m_syncingToCompositor = false;
     }
 
     void FallbackWindow::configureSizingForIntent(PromptIntent intent) {
@@ -736,7 +813,6 @@ namespace bb {
         }
 
         setMinimumSize(m_minWidth, m_minHeight);
-        setMaximumSize(680, 640);
     }
 
     FallbackWindow::PromptDisplayModel FallbackWindow::buildDisplayModel(const QJsonObject& event) const {

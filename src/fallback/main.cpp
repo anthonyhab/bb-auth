@@ -5,14 +5,25 @@
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QLockFile>
 
+#include <cstdlib>
+
 int main(int argc, char* argv[]) {
+    const QByteArray waylandDisplay = qgetenv("WAYLAND_DISPLAY");
+    const QByteArray platformEnv    = qgetenv("QT_QPA_PLATFORM");
+    if (!waylandDisplay.isEmpty() && platformEnv.isEmpty()) {
+        // Prefer native Wayland when available; keep xcb fallback for mixed setups.
+        qputenv("QT_QPA_PLATFORM", QByteArrayLiteral("wayland;xcb"));
+    }
+
     QApplication app(argc, argv);
     app.setApplicationName("bb-auth-fallback");
     QGuiApplication::setDesktopFileName("bb-auth-fallback");
+    qWarning() << "bb-auth-fallback platform:" << QGuiApplication::platformName() << "marker:geo-debug-v2";
 
     QCommandLineParser parser;
     parser.addHelpOption();
@@ -39,6 +50,7 @@ int main(int argc, char* argv[]) {
     bb::FallbackClient client(socketPath);
     bb::FallbackWindow window(&client);
     client.start();
-
-    return app.exec();
+    const int rc = app.exec();
+    fallbackLock.unlock();
+    std::_Exit(rc);
 }

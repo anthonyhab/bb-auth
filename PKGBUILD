@@ -34,15 +34,17 @@ pkgver() {
 
 build() {
     cd "$pkgname"
+    local jobs="${CMAKE_BUILD_PARALLEL_LEVEL:-${JOBS:-$(nproc)}}"
     cmake -S . -B build \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr
-    cmake --build build
+    cmake --build build -j"$jobs"
 }
 
 check() {
     cd "$pkgname"
-    ctest --test-dir build --output-on-failure
+    local jobs="${CTEST_PARALLEL_LEVEL:-${JOBS:-$(nproc)}}"
+    ctest --test-dir build --output-on-failure --parallel "$jobs"
 }
 
 package() {

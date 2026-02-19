@@ -8,6 +8,7 @@ BUILD_CHECK_DIR="${BUILD_CHECK_DIR:-$ROOT_DIR/build-check}"
 BUILD_CORE_DIR="${BUILD_CORE_DIR:-$ROOT_DIR/build-core}"
 INSTALL_SMOKE_DIR="${INSTALL_SMOKE_DIR:-$ROOT_DIR/build-install-smoke}"
 
+RUN_BUILD_CHECK=1
 RUN_CORE=1
 RUN_INSTALL_SMOKE=1
 RUN_DAEMON_SMOKE=1
@@ -25,6 +26,8 @@ Options:
   --quick              Skip build-core, install smoke, and daemon smoke.
   --aur-smoke          Run optional local AUR PKGBUILD smoke (makepkg).
   --deploy-local       Build local package and install via pacman -U.
+  --deploy-only        Fast local loop: run deploy-local only (no build gates).
+  --skip-build-check   Skip build-check configure/build/ctest gate.
   --skip-core          Skip build-core configure/build/ctest gate.
   --skip-install-smoke Skip install smoke gate.
   --skip-daemon-smoke  Skip daemon socket ping smoke gate.
@@ -33,6 +36,7 @@ Options:
 Env:
   STRICT_DAEMON_SMOKE=1  Fail if daemon IPC bind is unavailable. Default skips
                          this gate when local session policy prevents binding.
+  CLEAN_LOCAL_PKG=1      Force clean local package work dir before makepkg.
 EOF
 }
 
@@ -45,6 +49,50 @@ require_cmd() {
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "Missing required command: $cmd" >&2
         exit 1
+    fi
+}
+
+has_dirty_worktree() {
+    if [[ -n "$(git -C "$ROOT_DIR" status --porcelain 2>/dev/null)" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+build_fallback_override() {
+    local fallback_path="$1"
+
+    log_step "Gate [deploy-local]: build fallback override from working tree"
+    cmake -S "$ROOT_DIR" -B "$BUILD_CHECK_DIR" -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$BUILD_CHECK_DIR" --target bb-auth-fallback -j"$JOBS"
+
+    if [[ ! -x "$fallback_path" ]]; then
+        echo "Deploy failed: fallback override binary missing at $fallback_path" >&2
+        exit 1
+    fi
+}
+
+apply_fallback_override() {
+    local fallback_path="${1:-}"
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "Skipping fallback override: systemctl not found." >&2
+        return
+    fi
+
+    if [[ -n "$fallback_path" ]]; then
+        log_step "Gate [deploy-local]: set runtime fallback override"
+        if systemctl --user set-environment "BB_AUTH_FALLBACK_PATH=$fallback_path"; then
+            echo "Using BB_AUTH_FALLBACK_PATH=$fallback_path"
+        else
+            echo "Warning: failed to set BB_AUTH_FALLBACK_PATH override." >&2
+        fi
+        return
+    fi
+
+    log_step "Gate [deploy-local]: clear runtime fallback override"
+    if ! systemctl --user unset-environment BB_AUTH_FALLBACK_PATH; then
+        echo "Warning: failed to clear BB_AUTH_FALLBACK_PATH override." >&2
     fi
 }
 
@@ -160,8 +208,10 @@ run_aur_smoke() {
 
 build_local_pkg() {
     local work_dir="$1"
-
-    rm -rf "$work_dir"
+    local clean_local_pkg="${CLEAN_LOCAL_PKG:-0}"
+    if [[ "$clean_local_pkg" == "1" ]]; then
+        rm -rf "$work_dir"
+    fi
     mkdir -p "$work_dir"
 
     cp "$ROOT_DIR/PKGBUILD" "$work_dir/PKGBUILD"
@@ -185,11 +235,19 @@ build_local_pkg() {
 
     (
         cd "$work_dir"
-        makepkg -s --noconfirm --nocheck
+        # Keep makepkg logs out of command-substitution output.
+        JOBS="$JOBS" CMAKE_BUILD_PARALLEL_LEVEL="$JOBS" CTEST_PARALLEL_LEVEL="$JOBS" \
+            makepkg -f -s --noconfirm --nocheck >&2
     )
 
     local pkg_path
-    pkg_path="$(ls -1t "$work_dir"/*.pkg.tar.* | head -n 1 || true)"
+    pkg_path="$(
+        ls -1t "$work_dir"/bb-auth-git-*.pkg.tar.* 2>/dev/null \
+            | grep -v -- '-debug-' \
+            | grep -v -- '\.sig$' \
+            | head -n 1 \
+            || true
+    )"
     if [[ -z "$pkg_path" ]]; then
         echo "Failed to locate generated package in $work_dir" >&2
         exit 1
@@ -204,6 +262,7 @@ run_deploy_local() {
 
     local deploy_dir="$ROOT_DIR/build-local-pkg"
     local pkg_path
+    local fallback_override=""
 
     log_step "Gate [deploy-local]: build package"
     pkg_path="$(build_local_pkg "$deploy_dir")"
@@ -217,6 +276,14 @@ run_deploy_local() {
     else
         echo "Cannot install package: sudo not found and not running as root." >&2
         exit 1
+    fi
+
+    if has_dirty_worktree; then
+        fallback_override="$BUILD_CHECK_DIR/bb-auth-fallback"
+        build_fallback_override "$fallback_override"
+        apply_fallback_override "$fallback_override"
+    else
+        apply_fallback_override ""
     fi
 
     log_step "Gate [deploy-local]: restart user service"
@@ -233,12 +300,25 @@ while [[ $# -gt 0 ]]; do
             RUN_DAEMON_SMOKE=0
             shift
             ;;
+        --deploy-only)
+            RUN_BUILD_CHECK=0
+            RUN_CORE=0
+            RUN_INSTALL_SMOKE=0
+            RUN_DAEMON_SMOKE=0
+            RUN_AUR_SMOKE=0
+            RUN_DEPLOY_LOCAL=1
+            shift
+            ;;
         --aur-smoke)
             RUN_AUR_SMOKE=1
             shift
             ;;
         --deploy-local)
             RUN_DEPLOY_LOCAL=1
+            shift
+            ;;
+        --skip-build-check)
+            RUN_BUILD_CHECK=0
             shift
             ;;
         --skip-core)
@@ -269,7 +349,9 @@ require_cmd cmake
 require_cmd ctest
 require_cmd git
 
-run_build_gate "build-check" "$BUILD_CHECK_DIR"
+if [[ "$RUN_BUILD_CHECK" -eq 1 ]]; then
+    run_build_gate "build-check" "$BUILD_CHECK_DIR"
+fi
 
 if [[ "$RUN_CORE" -eq 1 ]]; then
     run_build_gate "build-core" "$BUILD_CORE_DIR"

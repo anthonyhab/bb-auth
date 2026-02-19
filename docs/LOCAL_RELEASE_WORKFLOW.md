@@ -46,7 +46,34 @@ Install-test locally by replacing your current Arch package:
 STRICT_DAEMON_SMOKE=1 ./scripts/gate-local.sh --deploy-local
 ```
 
-This builds from your working tree and installs via `pacman -U`.
+This builds from local git HEAD and installs via `pacman -U`.
+If your working tree is dirty, `gate-local` also builds `build-check/bb-auth-fallback`
+from your current edits and sets a runtime override:
+
+```bash
+systemctl --user set-environment BB_AUTH_FALLBACK_PATH=...
+```
+
+so fallback UI changes are exercised immediately without requiring a commit.
+
+Fastest deploy loop while iterating on daemon/UI behavior:
+
+```bash
+./scripts/gate-local.sh --deploy-only
+```
+
+To force a clean package work dir before building:
+
+```bash
+CLEAN_LOCAL_PKG=1 ./scripts/gate-local.sh --deploy-only
+```
+
+If you want to clear the runtime fallback override manually:
+
+```bash
+systemctl --user unset-environment BB_AUTH_FALLBACK_PATH
+systemctl --user restart bb-auth.service
+```
 
 If daemon smoke cannot bind IPC in your current desktop/session policy, the gate is skipped by default.
 To make that a hard failure, run with:

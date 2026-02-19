@@ -79,6 +79,7 @@ namespace bb {
         Q_OBJECT
 
       private slots:
+        void background_isOpaqueToAvoidBlurBleed();
         void keyboardEnter_submitsWithoutMouse();
         void keyboardEscape_cancelsWithoutMouse();
         void keyboardEscapeShortcut_registeredAtWindowLevel();
@@ -86,11 +87,23 @@ namespace bb {
         void keyboardTabOrder_cyclesPrimaryControls();
         void scaling_largeFontExpandsControlHeights();
         void contrast_textUsesReadablePaletteContrast();
-        void compositorResize_reappliesContentFitWithoutMove();
+        void tallResize_keepsControlsGrouped();
+        void compositorResize_keepsControlsGroupedWithoutInteraction();
         void submitTimeout_releasesBusyAndShowsRetry();
         void cancelTimeout_releasesBusyAndShowsError();
         void closedError_autoDismissesToAvoidDeadEnd();
     };
+
+    void FallbackWindowTouchModelTest::background_isOpaqueToAvoidBlurBleed() {
+        FallbackClient client("/tmp/non-existent-bb-auth.sock");
+        FallbackWindow window(&client);
+
+        QVERIFY(window.autoFillBackground());
+        QVERIFY(window.testAttribute(Qt::WA_StyledBackground));
+
+        const QColor background = window.palette().color(QPalette::Window);
+        QCOMPARE(background.alpha(), 255);
+    }
 
     void FallbackWindowTouchModelTest::keyboardEnter_submitsWithoutMouse() {
         EnvVarGuard   timeoutGuard("BB_AUTH_FALLBACK_ACTION_TIMEOUT_MS", "5000");
@@ -225,7 +238,23 @@ namespace bb {
         checkLabelContrast(window.m_statusLabel);
     }
 
-    void FallbackWindowTouchModelTest::compositorResize_reappliesContentFitWithoutMove() {
+    void FallbackWindowTouchModelTest::tallResize_keepsControlsGrouped() {
+        FallbackClient client("/tmp/non-existent-bb-auth.sock");
+        FallbackWindow window(&client);
+
+        const QJsonObject created = makeCreatedEvent("resize-grouped");
+        QVERIFY(QMetaObject::invokeMethod(&client, "sessionCreated", Qt::DirectConnection, Q_ARG(QJsonObject, created)));
+        QTRY_VERIFY_WITH_TIMEOUT(window.isVisible(), 1000);
+
+        const int oversizedHeight = qMin(760, window.height() + 300);
+        window.resize(window.width(), oversizedHeight);
+        QTest::qWait(150);
+
+        const int controlGap = window.m_cancelButton->geometry().top() - window.m_input->geometry().bottom();
+        QVERIFY2(controlGap < 120, qPrintable(QString("Control gap too large after tall resize: %1").arg(controlGap)));
+    }
+
+    void FallbackWindowTouchModelTest::compositorResize_keepsControlsGroupedWithoutInteraction() {
         FallbackClient client("/tmp/non-existent-bb-auth.sock");
         FallbackWindow window(&client);
 
@@ -233,15 +262,14 @@ namespace bb {
         QVERIFY(QMetaObject::invokeMethod(&client, "sessionCreated", Qt::DirectConnection, Q_ARG(QJsonObject, created)));
         QTRY_VERIFY_WITH_TIMEOUT(window.isVisible(), 1000);
 
-        const int fittedHeight = window.height();
-        const int oversizedHeight = qMin(620, fittedHeight + 260);
-        QVERIFY(oversizedHeight > fittedHeight);
+        const int oversizedHeight = qMin(760, window.height() + 300);
 
         window.resize(window.width(), oversizedHeight);
+        QTest::qWait(150);
 
-        // Hyprland/Wayland may deliver external geometry updates after map; the
-        // window should re-fit content without requiring manual move/drag.
-        QTRY_VERIFY_WITH_TIMEOUT(window.height() <= (fittedHeight + 8), 1500);
+        // Compositor-sized/tiled windows should keep the prompt block compact.
+        const int controlGap = window.m_cancelButton->geometry().top() - window.m_input->geometry().bottom();
+        QVERIFY2(controlGap < 120, qPrintable(QString("Control gap too large after compositor resize: %1").arg(controlGap)));
     }
 
     void FallbackWindowTouchModelTest::submitTimeout_releasesBusyAndShowsRetry() {

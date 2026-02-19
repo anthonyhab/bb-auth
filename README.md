@@ -30,7 +30,7 @@ Manual:
 git clone https://github.com/anthonyhab/bb-auth
 cd bb-auth
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake --build build -j"$(nproc)"
 cmake --install build
 ```
 
@@ -86,7 +86,7 @@ Build and test:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build
+cmake --build build -j"$(nproc)"
 ctest --test-dir build --output-on-failure
 ```
 
@@ -106,6 +106,9 @@ Replace local Arch install with your working tree build:
 
 ```bash
 STRICT_DAEMON_SMOKE=1 ./scripts/gate-local.sh --deploy-local
+
+# fastest packaging/install loop while iterating:
+./scripts/gate-local.sh --deploy-only
 ```
 
 Workflow:

@@ -8,8 +8,8 @@
 class QLabel;
 class QLineEdit;
 class QPushButton;
-class QTimer;
 class QResizeEvent;
+class QTimer;
 class QShowEvent;
 
 namespace bb {
@@ -47,6 +47,7 @@ namespace bb {
         void               setDetailsExpanded(bool expanded);
         void               ensureContentFits();
         void               scheduleEnsureContentFits(int delayMs = 0);
+        void               syncToCompositorSize();
         void               configureSizingForIntent(PromptIntent intent);
         PromptDisplayModel buildDisplayModel(const QJsonObject& event) const;
 
@@ -86,6 +87,7 @@ namespace bb {
         QTimer* m_idleExitTimer = nullptr;
         QTimer* m_actionTimeoutTimer = nullptr;
         bool    m_fitRefreshScheduled = false;
+        bool    m_syncingToCompositor = false;
 
         void    startIdleExitTimer();
         void    stopIdleExitTimer();
