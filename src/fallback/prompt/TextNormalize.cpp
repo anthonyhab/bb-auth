@@ -1,5 +1,7 @@
 #include "TextNormalize.hpp"
 
+#include <QSet>
+
 namespace bb::fallback::prompt {
 
     QString normalizeDetailText(const QString& text) {
@@ -61,24 +63,26 @@ namespace bb::fallback::prompt {
     }
 
     QString uniqueJoined(const QStringList& values) {
-        QStringList filtered;
+        QStringList   filtered;
+        QSet<QString> seen;
+
         filtered.reserve(values.size());
+
         for (const QString& value : values) {
             const QString simplified = value.trimmed();
             if (simplified.isEmpty()) {
                 continue;
             }
 
-            bool duplicate = false;
-            for (const QString& existing : filtered) {
-                if (textEquivalent(existing, simplified)) {
-                    duplicate = true;
-                    break;
-                }
+            const QString norm = normalizeCompareText(simplified);
+            if (norm.isEmpty()) {
+                filtered << simplified;
+                continue;
             }
 
-            if (!duplicate) {
+            if (!seen.contains(norm)) {
                 filtered << simplified;
+                seen.insert(norm);
             }
         }
 
