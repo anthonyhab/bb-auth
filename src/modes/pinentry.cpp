@@ -4,16 +4,13 @@
 #include "../common/IpcClient.hpp"
 #include "../common/Paths.hpp"
 
-#include <QCoreApplication>
-#include <QJsonDocument>
 #include <QJsonObject>
-#include <QTextStream>
 #include <QUuid>
 
-#include <cstring>
 #include <iostream>
 #include <print>
 #include <string>
+#include <unistd.h>
 #include <QStringView>
 
 namespace {
