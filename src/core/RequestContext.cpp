@@ -140,9 +140,12 @@ void                      RequestContextHelper::ensureDesktopIndex() {
             d.exec      = settings.value("Exec").toString().split(' ').first().remove('"');
             d.tryExec   = settings.value("TryExec").toString();
 
-            // We'll store the Exec string too for matching if needed,
-            // but for now let's just use the index.
-            // Matching will be done by filename vs exe basename mostly.
+            if (!d.exec.isEmpty()) {
+                d.execBase = QFileInfo(d.exec).fileName();
+            }
+            if (!d.tryExec.isEmpty()) {
+                d.tryExecBase = QFileInfo(d.tryExec).fileName();
+            }
 
             if (!d.name.isEmpty()) {
                 g_desktopIndex << d;
@@ -172,13 +175,13 @@ DesktopInfo RequestContextHelper::findDesktopForExe(const QString& exePath) {
 
     // 3. Match by Exec basename
     for (const auto& d : g_desktopIndex) {
-        if (!d.exec.isEmpty() && QFileInfo(d.exec).fileName() == base)
+        if (!d.execBase.isEmpty() && d.execBase == base)
             return d;
     }
 
     // 4. Match by TryExec basename
     for (const auto& d : g_desktopIndex) {
-        if (!d.tryExec.isEmpty() && QFileInfo(d.tryExec).fileName() == base)
+        if (!d.tryExecBase.isEmpty() && d.tryExecBase == base)
             return d;
     }
 
