@@ -23,7 +23,9 @@ struct DesktopInfo {
     QString name;
     QString iconName;
     QString exec;
+    QString execBase;
     QString tryExec;
+    QString tryExecBase;
 
     bool    isValid() const {
         return !desktopId.isEmpty();
