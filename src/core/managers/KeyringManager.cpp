@@ -1,6 +1,7 @@
 #include "KeyringManager.hpp"
 #include "../Agent.hpp"
 
+#include <QDebug>
 #include <QJsonDocument>
 #include <QUuid>
 
@@ -12,6 +13,22 @@ namespace bb {
         QString cookie = msg.value("cookie").toString();
         if (cookie.isEmpty()) {
             cookie = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        }
+
+        // Bind the cookie to its owning peer. A request whose cookie is already held by a
+        // different peer is rejected before any state is mutated: otherwise a hostile
+        // same-UID peer could supply another peer's cookie and overwrite (then, on the
+        // session collision, delete) the legitimate requester's socket mapping — stranding
+        // its prompt (F5).
+        if (auto existing = m_pendingRequests.constFind(cookie); existing != m_pendingRequests.constEnd() && existing->peerPid != peerPid) {
+            qWarning() << "Keyring owner mismatch for cookie" << cookie << "expected pid" << existing->peerPid << "got" << peerPid;
+            QJsonObject   error{{"type", "error"}, {"message", "Cookie owned by another peer"}};
+            QJsonDocument doc(error);
+            if (socket && socket->isOpen()) {
+                socket->write(doc.toJson(QJsonDocument::Compact) + "\n");
+                socket->flush();
+            }
+            return;
         }
 
         KeyringRequest request;
@@ -27,7 +44,11 @@ namespace bb {
 
         request.message = msg.value("message").toString();
         request.choice  = msg.value("choice").toString();
-        request.flags   = msg.value("flags").toInt();
+        // `flags` is caller-supplied (untrusted) and currently only stored, never
+        // interpreted. Bound it to a non-negative 16-bit range so an absurd value cannot
+        // become an out-of-range surprise for any future consumer (F7).
+        const int rawFlags = msg.value("flags").toInt();
+        request.flags      = (rawFlags < 0) ? 0 : (rawFlags & 0xFFFF);
 
         m_pendingRequests[cookie] = request;
 

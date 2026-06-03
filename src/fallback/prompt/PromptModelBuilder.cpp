@@ -205,15 +205,29 @@ namespace bb::fallback::prompt {
                 model.details = normalizedMessage;
             }
         }
+        const bool isAgentRequestor = requestor.value("isAgent").toBool();
         if (!requestorName.isEmpty()) {
             const bool duplicateUnlockRequestor = (model.intent == PromptIntent::Unlock) && (requestorName.compare(unlockTarget, Qt::CaseInsensitive) == 0);
             if (!duplicateUnlockRequestor) {
                 const bool weakIdentity = (source == "polkit") && (requestorName.compare("unknown", Qt::CaseInsensitive) == 0) && (requestorPid > 0);
-                model.requestor         = weakIdentity ? QString("Requested by process %1").arg(requestorPid) : QString("Requested by %1").arg(requestorName);
+                if (weakIdentity) {
+                    model.requestor = QString("Requested by process %1").arg(requestorPid);
+                } else if (isAgentRequestor) {
+                    // Make AI-agent provenance unmistakable at the prompt.
+                    model.requestor = QString("Requested by %1 (AI agent)").arg(requestorName);
+                } else {
+                    model.requestor = QString("Requested by %1").arg(requestorName);
+                }
             }
         } else if ((source == "polkit") && (requestorPid > 0)) {
             model.requestor = QString("Requested by process %1").arg(requestorPid);
         }
+
+        // Declared intent — display/audit only. Surfaced so a human supervising an
+        // auto-mode agent can see the stated reason; the decision is unaffected.
+        const QJsonObject intent = context.value("intent").toObject();
+        model.reason             = normalizeDetailText(intent.value("reason").toString());
+        model.intentMismatch     = intent.value("mismatch").toBool();
         if (model.summary.isEmpty() && !model.details.isEmpty()) {
             const QString normalizedDetails = normalizeDetailText(model.details);
             const qsizetype newline         = normalizedDetails.indexOf('\n');

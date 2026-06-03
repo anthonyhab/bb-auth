@@ -1,5 +1,6 @@
 #include "../src/core/RequestContext.hpp"
 #include <QtTest/QtTest>
+#include <unistd.h>
 
 class RequestContextTest : public QObject {
     Q_OBJECT
@@ -8,6 +9,10 @@ class RequestContextTest : public QObject {
     void testSpoofedProcessName();
     void testUnreadableExeSpoofingAttempt();
     void testRealPkexecFallback();
+    void testAgentDetectedFromCmdline();
+    void testAgentWinsOverAncestry();
+    void testNonAgentNotFlagged();
+    void testReadProcSelf();
 };
 
 void RequestContextTest::testSpoofedProcessName() {
@@ -117,6 +122,109 @@ void RequestContextTest::testRealPkexecFallback() {
     // Continues to shell.
     // Result: 101.
     QCOMPARE(result.proc.pid, 101);
+}
+
+void RequestContextTest::testAgentDetectedFromCmdline() {
+    // detectAgent matches on cmdline tokens even when exe is a generic runtime (node).
+    ProcInfo node;
+    node.name    = "node";
+    node.exe     = "/usr/bin/node";
+    node.cmdline = "node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js";
+
+    const AgentMatch m = RequestContextHelper::detectAgent(node);
+    QVERIFY(m.isValid());
+    QCOMPARE(m.kind, QString("claude-code"));
+
+    ProcInfo plain;
+    plain.name    = "node";
+    plain.exe     = "/usr/bin/node";
+    plain.cmdline = "node server.js";
+    QVERIFY(!RequestContextHelper::detectAgent(plain).isValid());
+}
+
+void RequestContextTest::testAgentWinsOverAncestry() {
+    // pkexec (root bridge) -> node(claude) -> would-be terminal.
+    // Resolution must stop at the agent and attribute it, not walk to the terminal.
+    ProcInfo pkexec;
+    pkexec.pid = 100;
+    pkexec.ppid = 101;
+    pkexec.uid = 1000;
+    pkexec.euid = 0;
+    pkexec.name = "pkexec";
+    pkexec.exe = "";
+
+    ProcInfo claude;
+    claude.pid = 101;
+    claude.ppid = 102;
+    claude.uid = 1000;
+    claude.euid = 1000;
+    claude.name = "node";
+    claude.exe = "/usr/bin/node";
+    claude.cmdline = "node /opt/claude-code/cli.js --print";
+
+    ProcInfo terminal;
+    terminal.pid = 102;
+    terminal.ppid = 1;
+    terminal.uid = 1000;
+    terminal.euid = 1000;
+    terminal.name = "ghostty";
+    terminal.exe = "/usr/bin/ghostty";
+
+    auto procReader = [&](qint64 pid) -> std::optional<ProcInfo> {
+        if (pid == 100) return pkexec;
+        if (pid == 101) return claude;
+        if (pid == 102) return terminal;
+        return std::nullopt;
+    };
+
+    ActorInfo result = RequestContextHelper::resolveRequestorFromSubject(pkexec, 1000, procReader);
+    QVERIFY(result.isAgent);
+    QCOMPARE(result.agentKind, QString("claude-code"));
+    QCOMPARE(result.proc.pid, (qint64)101);
+    QCOMPARE(result.confidence, QString("agent"));
+}
+
+void RequestContextTest::testNonAgentNotFlagged() {
+    // pkexec -> bash, no agent anywhere. Must not be flagged as an agent.
+    ProcInfo pkexec;
+    pkexec.pid = 100;
+    pkexec.ppid = 101;
+    pkexec.uid = 1000;
+    pkexec.euid = 0;
+    pkexec.name = "pkexec";
+    pkexec.exe = "";
+
+    ProcInfo bash;
+    bash.pid = 101;
+    bash.ppid = 1;
+    bash.uid = 1000;
+    bash.euid = 1000;
+    bash.name = "bash";
+    bash.exe = "/usr/bin/bash";
+    bash.cmdline = "bash";
+
+    auto procReader = [&](qint64 pid) -> std::optional<ProcInfo> {
+        if (pid == 100) return pkexec;
+        if (pid == 101) return bash;
+        return std::nullopt;
+    };
+
+    ActorInfo result = RequestContextHelper::resolveRequestorFromSubject(pkexec, 1000, procReader);
+    QVERIFY(!result.isAgent);
+    QVERIFY(result.agentKind.isEmpty());
+}
+
+void RequestContextTest::testReadProcSelf() {
+    // Exercise the real dirfd-pinned /proc reader against our own process.
+    const auto info = RequestContextHelper::readProc(getpid());
+    QVERIFY(info.has_value());
+    QCOMPARE(info->pid, (qint64)getpid());
+    QCOMPARE(info->ppid, (qint64)getppid());
+    QVERIFY(!info->name.isEmpty());
+    QVERIFY(info->startTime > 0);
+
+    // A pid that cannot exist must fail closed, not return garbage.
+    QVERIFY(!RequestContextHelper::readProc(2147483646).has_value());
 }
 
 // We need an entry point.

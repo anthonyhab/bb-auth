@@ -1,5 +1,7 @@
 #include "ProviderDiscovery.hpp"
 
+#include "../../common/Constants.hpp"
+
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
@@ -64,6 +66,14 @@ namespace bb::providers {
             const QFileInfoList manifests = dir.entryInfoList(QStringList{"*.json"}, QDir::Files | QDir::Readable, QDir::Name);
 
             for (const QFileInfo& manifestInfo : manifests) {
+                if (manifestInfo.size() > static_cast<qint64>(MAX_MANIFEST_SIZE)) {
+                    result.warnings.push_back(QStringLiteral("Skipping manifest %1: exceeds maximum size of %2 bytes (%3)")
+                                                  .arg(manifestInfo.absoluteFilePath())
+                                                  .arg(static_cast<qint64>(MAX_MANIFEST_SIZE))
+                                                  .arg(manifestInfo.size()));
+                    continue;
+                }
+
                 QFile file(manifestInfo.absoluteFilePath());
                 if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
                     result.warnings.push_back(QStringLiteral("Skipping manifest %1: cannot read file").arg(manifestInfo.absoluteFilePath()));

@@ -16,6 +16,8 @@
 #include <string>
 #include <QStringView>
 
+#include <unistd.h> // getpid
+
 namespace {
 
     // Assuan percent-decoding

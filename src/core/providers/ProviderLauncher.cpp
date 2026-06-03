@@ -33,16 +33,18 @@ namespace bb::providers {
         m_nowFn(nowFn ? std::move(nowFn) : defaultNowMs), m_startProcessFn(startProcessFn ? std::move(startProcessFn) : defaultStartProcess) {}
 
     LaunchAttemptResult ProviderLauncher::tryLaunch(const QList<ProviderManifest>& manifests, const QString& socketPath, const QString& reason, bool hasActiveProvider,
-                                                    bool hasPendingSessions, const QString& legacyFallbackPath, const QString& defaultFallbackPath) {
+                                                    bool hasPendingSessions, const QString& legacyFallbackPath, const QString& defaultFallbackPath, bool eager) {
         LaunchAttemptResult result;
 
-        if (hasActiveProvider || !hasPendingSessions) {
+        // On-demand launch requires a pending session (never spawn UI for nothing); eager
+        // launch deliberately bypasses that to bring a resident provider up ahead of time.
+        if (hasActiveProvider || (!eager && !hasPendingSessions)) {
             result.detail = QStringLiteral("skip: no launch required");
             return result;
         }
 
         QString    selectionError;
-        const auto candidate = selectCandidate(manifests, legacyFallbackPath, defaultFallbackPath, socketPath, selectionError);
+        const auto candidate = selectCandidate(manifests, eager, legacyFallbackPath, defaultFallbackPath, socketPath, selectionError);
         if (candidate.id.isEmpty()) {
             result.detail = selectionError;
             return result;
@@ -62,7 +64,8 @@ namespace bb::providers {
         result.providerId = candidate.id;
         result.executable = candidate.exec;
 
-        if (!m_startProcessFn(candidate.exec, candidate.args, candidate.env)) {
+        const qint64 launchedPid = m_startProcessFn(candidate.exec, candidate.args, candidate.env);
+        if (launchedPid <= 0) {
             markFailure(candidate.id, nowMs);
             result.detail   = QStringLiteral("launch failed for '%1' (%2)").arg(candidate.displayName, reason);
             result.launched = false;
@@ -70,8 +73,9 @@ namespace bb::providers {
         }
 
         markSuccess(candidate.id);
-        result.launched = true;
-        result.detail   = QStringLiteral("launched '%1' (%2)").arg(candidate.displayName, reason);
+        result.launched    = true;
+        result.launchedPid = launchedPid;
+        result.detail      = QStringLiteral("launched '%1' (%2)").arg(candidate.displayName, reason);
         return result;
     }
 
@@ -79,12 +83,21 @@ namespace bb::providers {
         return QDateTime::currentMSecsSinceEpoch();
     }
 
-    bool ProviderLauncher::defaultStartProcess(const QString& program, const QStringList& args, const QProcessEnvironment& env) {
+    qint64 ProviderLauncher::defaultStartProcess(const QString& program, const QStringList& args, const QProcessEnvironment& env) {
         QProcess process;
         process.setProgram(program);
         process.setArguments(args);
         process.setProcessEnvironment(env);
-        return process.startDetached();
+
+        qint64 pid = 0;
+        if (!process.startDetached(&pid)) {
+            return 0;
+        }
+
+        // startDetached blocks until the child has exec'd, so a successful launch must
+        // yield a live pid. A success with no pid would strand the trust model (the
+        // provider could never be attested), so treat it as a failure.
+        return pid > 0 ? pid : 0;
     }
 
     QString ProviderLauncher::resolveExecutable(const QString& exec) {
@@ -110,10 +123,12 @@ namespace bb::providers {
         return env;
     }
 
-    ProviderLauncher::SelectedCandidate ProviderLauncher::selectCandidate(const QList<ProviderManifest>& manifests, const QString& legacyFallbackPath,
+    ProviderLauncher::SelectedCandidate ProviderLauncher::selectCandidate(const QList<ProviderManifest>& manifests, bool eager, const QString& legacyFallbackPath,
                                                                           const QString& defaultFallbackPath, const QString& socketPath, QString& selectionError) const {
+        // Eager (resident) launch only ever brings up a real autostart provider; the legacy
+        // env override and the built-in fallback are on-demand safety nets, not resident UI.
         const QString legacyEnvPath = legacyFallbackPath.trimmed();
-        if (!legacyEnvPath.isEmpty()) {
+        if (!eager && !legacyEnvPath.isEmpty()) {
             if (!isExecutableFile(legacyEnvPath)) {
                 selectionError = QStringLiteral("skip: BB_AUTH_FALLBACK_PATH is not executable: %1").arg(legacyEnvPath);
                 return SelectedCandidate{};
@@ -161,6 +176,11 @@ namespace bb::providers {
             }
             candidate.env = mergeEnvironment(manifest.env);
             return candidate;
+        }
+
+        if (eager) {
+            selectionError = QStringLiteral("skip: no autostart provider to launch eagerly");
+            return SelectedCandidate{};
         }
 
         const QString fallbackPath = defaultFallbackPath.trimmed();

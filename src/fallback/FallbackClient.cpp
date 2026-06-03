@@ -234,7 +234,12 @@ namespace bb {
                     return;
                 }
 
-                setProviderActive(true);
+                // The daemon reports no active provider. Under the v3.0 fail-closed model
+                // (no legacy "no active provider → anyone authorized" mode) this means we
+                // are NOT authorized: a self-promotion here would make every session.respond
+                // fail with "Not active UI provider". Wait for an authoritative
+                // ui.active{active:true,id:<us>} instead.
+                setProviderActive(false);
                 m_pendingProviderActiveKnown = false;
                 m_pendingProviderActive      = false;
                 m_pendingProviderId.clear();

@@ -18,6 +18,8 @@ namespace bb {
         void keyringUnlockUsesStandardizedCopy();
         void pinentryPromptRemainsPassphraseDriven();
         void pinentryPromptUpdateOverridesContextMessage();
+        void agentRequestorIsLabelledAndReasonSurfaced();
+        void intentMismatchIsFlagged();
 
       private:
         static QJsonObject makeEvent(const QString& source, const QString& message, const QString& info = QString());
@@ -149,6 +151,32 @@ namespace bb {
 
         QCOMPARE(model.prompt, QString("PIN:"));
         QVERIFY(!model.allowEmptyResponse);
+    }
+
+    void PromptModelBuilderTouchTest::agentRequestorIsLabelledAndReasonSurfaced() {
+        const fallback::prompt::PromptModelBuilder builder;
+        QJsonObject                                context{{"message", "Authentication is required"},
+                                                           {"requestor", QJsonObject{{"name", "Claude Code"}, {"isAgent", true}, {"agentKind", "claude-code"}, {"pid", 4242}}},
+                                                           {"intent", QJsonObject{{"reason", "remove duplicate desktop file"}, {"declaredAgent", "claude-code"}, {"mismatch", false}}}};
+        QJsonObject                                event{{"type", "session.created"}, {"id", "s1"}, {"source", "polkit"}, {"context", context}};
+
+        const auto model = builder.build(event);
+        QVERIFY(model.requestor.contains("Claude Code"));
+        QVERIFY(model.requestor.contains("AI agent"));
+        QCOMPARE(model.reason, QString("remove duplicate desktop file"));
+        QVERIFY(!model.intentMismatch);
+    }
+
+    void PromptModelBuilderTouchTest::intentMismatchIsFlagged() {
+        const fallback::prompt::PromptModelBuilder builder;
+        QJsonObject                                context{{"message", "Authentication is required"},
+                                                           {"requestor", QJsonObject{{"name", "Claude Code"}, {"isAgent", true}, {"agentKind", "claude-code"}}},
+                                                           {"intent", QJsonObject{{"reason", "totally legit"}, {"declaredAgent", "some-other-agent"}, {"mismatch", true}}}};
+        QJsonObject                                event{{"type", "session.created"}, {"id", "s2"}, {"source", "polkit"}, {"context", context}};
+
+        const auto model = builder.build(event);
+        QVERIFY(model.intentMismatch);
+        QCOMPARE(model.reason, QString("totally legit"));
     }
 
 } // namespace bb

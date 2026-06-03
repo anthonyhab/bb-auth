@@ -145,6 +145,12 @@ namespace bb {
         m_requestorLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
         m_requestorLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
         m_requestorLabel->hide();
+        m_reasonLabel = new QLabel(m_contentWidget);
+        m_reasonLabel->setWordWrap(true);
+        m_reasonLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        m_reasonLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+        m_reasonLabel->setStyleSheet("font-style: italic;");
+        m_reasonLabel->hide();
         m_contextLabel = new QLabel(m_contentWidget);
         m_contextLabel->setWordWrap(true);
         m_contextLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -199,6 +205,7 @@ namespace bb {
         headerLayout->addWidget(m_titleLabel);
         headerLayout->addWidget(m_summaryLabel);
         headerLayout->addWidget(m_requestorLabel);
+        headerLayout->addWidget(m_reasonLabel);
         headerLayout->addWidget(m_contextLabel);
         headerLayout->addWidget(m_contextToggleButton, 0, Qt::AlignLeft);
         promptLayout->addWidget(m_promptLabel);
@@ -350,6 +357,14 @@ namespace bb {
             m_summaryLabel->setVisible(!model.summary.isEmpty());
             m_requestorLabel->setText(model.requestor);
             m_requestorLabel->setVisible(!model.requestor.isEmpty());
+            if (!model.reason.isEmpty()) {
+                const QString prefix = model.intentMismatch ? QStringLiteral("⚠ Stated reason (agent identity unverified): ") : QStringLiteral("Stated reason: ");
+                m_reasonLabel->setText(prefix + model.reason);
+                m_reasonLabel->setVisible(true);
+            } else {
+                m_reasonLabel->clear();
+                m_reasonLabel->hide();
+            }
             setDetailsText(model.details);
             m_promptLabel->setText(model.prompt);
 
@@ -608,6 +623,8 @@ namespace bb {
         m_summaryLabel->hide();
         m_requestorLabel->clear();
         m_requestorLabel->hide();
+        m_reasonLabel->clear();
+        m_reasonLabel->hide();
         setDetailsText("");
         setErrorText("");
         setStatusText("");

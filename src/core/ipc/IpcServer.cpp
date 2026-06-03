@@ -1,9 +1,12 @@
 #include "IpcServer.hpp"
 #include "../../common/Constants.hpp"
 
+#include <QDateTime>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonParseError>
+
+#include <algorithm>
 
 #include <sys/socket.h>
 #include <cstring>
@@ -21,7 +24,20 @@ namespace bb {
 
     } // namespace
 
-    IpcServer::IpcServer(QObject* parent) : QObject(parent) {}
+    namespace {
+
+        // Sweep often enough to honour the timeout without busy-spinning: half the timeout,
+        // bounded so a tiny test timeout still fires promptly and production stays cheap.
+        int sweepIntervalForTimeout(int timeoutMs) {
+            return std::clamp(timeoutMs / 2, 20, 2000);
+        }
+
+    } // namespace
+
+    IpcServer::IpcServer(QObject* parent) : QObject(parent) {
+        m_idleSweepTimer.setInterval(sweepIntervalForTimeout(m_incompleteFrameTimeoutMs));
+        connect(&m_idleSweepTimer, &QTimer::timeout, this, &IpcServer::sweepIncompleteFrames);
+    }
 
     IpcServer::~IpcServer() {
         stop();
@@ -46,18 +62,27 @@ namespace bb {
         }
 
         connect(m_server, &QLocalServer::newConnection, this, &IpcServer::onNewConnection);
+        m_idleSweepTimer.start();
         return true;
+    }
+
+    void IpcServer::setIncompleteFrameTimeoutMs(int ms) {
+        m_incompleteFrameTimeoutMs = ms;
+        m_idleSweepTimer.setInterval(sweepIntervalForTimeout(ms));
     }
 
     void IpcServer::stop() {
         if (!m_server)
             return;
 
+        m_idleSweepTimer.stop();
+
         // Disconnect all clients
         for (auto* socket : m_buffers.keys()) {
             socket->disconnectFromServer();
         }
         m_buffers.clear();
+        m_incompleteFrameSince.clear();
 
         m_server->close();
         delete m_server;
@@ -137,6 +162,36 @@ namespace bb {
                 handleLine(socket, line);
             }
         }
+
+        // Whatever remains is an incomplete frame. Start (but never reset) its clock so a
+        // peer that drips bytes without ever sending a newline still times out (F6).
+        trackIncompleteFrame(socket, !buffer.isEmpty());
+    }
+
+    void IpcServer::trackIncompleteFrame(QLocalSocket* socket, bool hasPartialFrame) {
+        if (!hasPartialFrame) {
+            m_incompleteFrameSince.remove(socket);
+        } else if (!m_incompleteFrameSince.contains(socket)) {
+            m_incompleteFrameSince.insert(socket, QDateTime::currentMSecsSinceEpoch());
+        }
+    }
+
+    void IpcServer::sweepIncompleteFrames() {
+        const qint64         now = QDateTime::currentMSecsSinceEpoch();
+
+        QList<QLocalSocket*> stale;
+        for (auto it = m_incompleteFrameSince.constBegin(); it != m_incompleteFrameSince.constEnd(); ++it) {
+            if ((now - it.value()) > m_incompleteFrameTimeoutMs) {
+                stale.append(it.key());
+            }
+        }
+
+        for (QLocalSocket* socket : stale) {
+            m_incompleteFrameSince.remove(socket);
+            if (socket) {
+                socket->disconnectFromServer();
+            }
+        }
     }
 
     void IpcServer::onDisconnected() {
@@ -145,6 +200,7 @@ namespace bb {
             return;
 
         m_buffers.remove(socket);
+        m_incompleteFrameSince.remove(socket);
         emit clientDisconnected(socket);
 
         socket->deleteLater();

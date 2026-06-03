@@ -66,12 +66,16 @@ qt_add_executable(bb-auth
     src/core/agent/EventQueue.hpp
     src/core/agent/ProviderRegistry.cpp
     src/core/agent/ProviderRegistry.hpp
+    src/core/agent/ProviderTrustStore.cpp
+    src/core/agent/ProviderTrustStore.hpp
     src/core/agent/EventRouter.cpp
     src/core/agent/EventRouter.hpp
     src/core/agent/SessionStore.cpp
     src/core/agent/SessionStore.hpp
     src/core/agent/MessageRouter.cpp
     src/core/agent/MessageRouter.hpp
+    src/core/agent/IntentStore.cpp
+    src/core/agent/IntentStore.hpp
     src/core/PolkitListener.hpp
     src/core/PolkitListener.cpp
     src/core/RequestContext.hpp
@@ -141,6 +145,15 @@ configure_file(assets/bb-auth-bootstrap.sh.in bb-auth-bootstrap @ONLY)
 install(TARGETS bb-auth
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
 
+# Agent intent integration — Claude Code PreToolUse hook. Declares who+why to the
+# daemon and routes a simple leading `sudo` through pkexec so bb-auth can supervise
+# the escalation. Console helper; Qt6::Core only (JSON), raw POSIX for the socket.
+qt_add_executable(bb-auth-intent-hook
+        integrations/claude-code/bb-auth-intent-hook.cpp)
+target_link_libraries(bb-auth-intent-hook PRIVATE Qt6::Core)
+install(TARGETS bb-auth-intent-hook
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
+
 qt_add_executable(bb-auth-fallback
     src/fallback/main.cpp
     src/fallback/FallbackClient.cpp
@@ -178,11 +191,13 @@ qt_add_executable(bb-auth-tests
     tests/test_provider_discovery.cpp
     tests/test_provider_launcher.cpp
     tests/test_provider_conformance.cpp
+    tests/test_provider_trust.cpp
     tests/test_text_normalize.cpp
     tests/test_session_store.cpp
     tests/test_classify_request.cpp
     tests/test_prompt_extractors.cpp
     tests/test_request_context.cpp
+    tests/test_intent_store.cpp
 
     src/core/Session.cpp
     src/core/Session.hpp
@@ -192,12 +207,16 @@ qt_add_executable(bb-auth-tests
     src/core/agent/EventQueue.hpp
     src/core/agent/ProviderRegistry.cpp
     src/core/agent/ProviderRegistry.hpp
+    src/core/agent/ProviderTrustStore.cpp
+    src/core/agent/ProviderTrustStore.hpp
     src/core/agent/EventRouter.cpp
     src/core/agent/EventRouter.hpp
     src/core/agent/SessionStore.cpp
     src/core/agent/SessionStore.hpp
     src/core/agent/MessageRouter.cpp
     src/core/agent/MessageRouter.hpp
+    src/core/agent/IntentStore.cpp
+    src/core/agent/IntentStore.hpp
     src/core/ipc/IpcServer.cpp
     src/core/providers/ProviderManifest.cpp
     src/core/providers/ProviderManifest.hpp

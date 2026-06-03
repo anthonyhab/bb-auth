@@ -1,18 +1,49 @@
 # bb-auth
 
-Unified Linux authentication daemon for:
+`bb-auth` gives you one consistent authentication prompt on Linux for:
 
 - polkit (`pkexec`)
-- GNOME Keyring prompts
+- GNOME Keyring system prompts
 - GPG pinentry
 
-It prefers an external UI provider when available, and falls back to the built-in Qt prompt when not.
+It runs as a user daemon and routes requests to a UI provider.
+If no external provider is available, it automatically uses a built-in Qt fallback prompt.
 
 ![Fallback prompt](assets/screenshot.png)
 
-## Install
+## Why Use It
 
-Arch (AUR):
+- One prompt style across system/admin/password requests.
+- Better context in prompts (what is requesting auth, and why).
+- Keyboard-friendly fallback UI.
+- Works even if an optional external provider is missing or crashes.
+
+## Who It Is For
+
+Use `bb-auth` if you want one auth UX across your Linux session.
+This is especially useful if you are tired of mixed prompt styles from different agents.
+
+You may want to wait if you prefer the exact default KDE/GNOME behavior and do not want to switch prompt agents yet.
+
+## What It Changes
+
+`bb-auth` replaces prompt agents in your user session:
+
+- polkit auth agent process in your session
+- keyring system prompter for interactive prompts
+- pinentry frontend process for interactive passphrase entry
+
+`bb-auth` does not replace backend security systems:
+
+- polkit authority/policies
+- secret storage backend semantics
+- GPG cryptography/agent model
+
+## Quick Start
+
+### 1. Install
+
+Arch:
 
 ```bash
 yay -S bb-auth-git
@@ -34,7 +65,7 @@ cmake --build build -j"$(nproc)"
 cmake --install build
 ```
 
-## Enable
+### 2. Enable
 
 ```bash
 systemctl --user daemon-reload
@@ -42,43 +73,49 @@ systemctl --user enable --now bb-auth.service
 systemctl --user status bb-auth.service
 ```
 
-Quick prompt check:
+### 3. Verify
 
 ```bash
 pkexec echo ok
 ```
 
-## Provider Model
+## Common Setup Problems
 
-- Core daemon stays minimal.
-- UI providers are runtime drop-ins via manifests in `providers.d`.
-- If provider is unavailable, built-in Qt fallback is launched automatically.
-
-Provider contract:
-
-- `docs/PROVIDER_CONTRACT.md`
-- `docs/PROVIDER_PACKAGING.md`
-
-## Common Problems
-
-Service/log checks:
+Check service and recent logs:
 
 ```bash
 systemctl --user status bb-auth.service
 journalctl --user -u bb-auth.service -n 200 --no-pager
 ```
 
-GPG prompt still in terminal:
+GPG still opens terminal pinentry:
 
 ```bash
 bb-auth-bootstrap
 ```
 
-If another polkit agent is running, restart `bb-auth` after stopping the conflicting agent.
+If polkit prompts do not appear, another polkit agent is usually active.
+Stop the conflicting agent, then restart:
 
-More:
+```bash
+systemctl --user daemon-reload
+systemctl --user restart bb-auth.service
+```
+
+More troubleshooting:
 
 - `docs/TROUBLESHOOTING.md`
+
+## Provider Model (Advanced)
+
+- UI providers are runtime drop-ins via manifests in `providers.d`.
+- If no provider is available, the built-in Qt fallback is used automatically.
+
+Provider and integration docs:
+
+- `docs/PROVIDER_CONTRACT.md`
+- `docs/PROVIDER_PACKAGING.md`
+- `examples/provider-template/`
 
 ## Development
 
@@ -114,6 +151,7 @@ STRICT_DAEMON_SMOKE=1 ./scripts/gate-local.sh --deploy-local
 Workflow:
 
 - `docs/LOCAL_RELEASE_WORKFLOW.md`
+- `PLAN.md`
 - `AGENTS.md`
 
 ## License

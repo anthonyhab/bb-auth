@@ -10,6 +10,10 @@
 #include <QDebug>
 #include <iostream>
 
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+
 QJsonObject ProcInfo::toJson() const {
     QJsonObject obj;
     if (pid > 0)
@@ -40,6 +44,10 @@ QJsonObject ActorInfo::toJson() const {
     obj["fallbackLetter"] = fallbackLetter;
     obj["fallbackKey"]    = fallbackKey;
     obj["confidence"]     = confidence;
+    if (isAgent) {
+        obj["isAgent"]   = true;
+        obj["agentKind"] = agentKind;
+    }
     return obj;
 }
 
@@ -64,53 +72,111 @@ std::optional<qint64> RequestContextHelper::extractCallerPid(const PolkitQt1::De
     return std::nullopt;
 }
 
+namespace {
+
+    // Read a small /proc file relative to a pinned dir fd. Returns empty on any error
+    // (including the pid having been recycled out from under us).
+    QByteArray readProcEntry(int dirfd, const char* name) {
+        const int fd = openat(dirfd, name, O_RDONLY | O_CLOEXEC);
+        if (fd < 0) {
+            return {};
+        }
+        QByteArray out;
+        char       buf[4096];
+        for (;;) {
+            const ssize_t n = read(fd, buf, sizeof(buf));
+            if (n > 0) {
+                out.append(buf, static_cast<int>(n));
+                if (out.size() > 256 * 1024) // sanity bound; /proc entries are tiny
+                    break;
+            } else if (n == 0) {
+                break;
+            } else if (errno == EINTR) {
+                continue;
+            } else {
+                break;
+            }
+        }
+        close(fd);
+        return out;
+    }
+
+    // starttime is /proc/<pid>/stat field 22. comm (field 2) is wrapped in parens and may
+    // itself contain spaces/parens, so anchor parsing on the LAST ')' and count from there.
+    qint64 parseStartTime(const QByteArray& stat) {
+        const int rparen = stat.lastIndexOf(')');
+        if (rparen < 0)
+            return 0;
+        const QList<QByteArray> rest = stat.mid(rparen + 1).simplified().split(' ');
+        // After ')', token[0] is field 3 (state); field 22 (starttime) is token[19].
+        if (rest.size() <= 19)
+            return 0;
+        return rest[19].toLongLong();
+    }
+
+} // namespace
+
 std::optional<ProcInfo> RequestContextHelper::readProc(qint64 pid) {
     ProcInfo info;
     info.pid = pid;
 
-    // 1. Read Status first (world-readable, metadata hero)
-    QFile fStat(QString("/proc/%1/status").arg(pid));
-    if (fStat.open(QIODevice::ReadOnly)) {
-        QByteArray data = fStat.readAll();
-        fStat.close();
-        if (data.isEmpty()) {
-            qDebug() << "readProc: /proc/" << pid << "/status is EMPTY";
-        }
-        QStringList lines = QString::fromUtf8(data).split('\n');
-        for (const auto& line : lines) {
-            if (line.startsWith("Name:")) {
-                info.name = line.section(':', 1).trimmed();
-            } else if (line.startsWith("PPid:")) {
-                info.ppid = line.section(':', 1).trimmed().toLongLong();
-            } else if (line.startsWith("Uid:")) {
-                QStringList parts = line.section(':', 1).simplified().split(' ');
-                if (parts.size() >= 1)
-                    info.uid = parts[0].toLongLong();
-                if (parts.size() >= 2)
-                    info.euid = parts[1].toLongLong();
-            }
-        }
-    } else {
-        qDebug() << "readProc: Failed to open /proc/" << pid << "/status:" << fStat.errorString();
+    // Pin /proc/<pid> via a directory fd and read every field relative to it. This
+    // guarantees all fields describe the SAME process: if the pid is recycled while we
+    // read, the openat()s below fail rather than silently mixing another process's data
+    // (the PID-reuse TOCTOU). Note: the window between polkit's measurement and this
+    // open cannot be closed here without an authoritative start-time from polkit.
+    const QByteArray procPath = QByteArrayLiteral("/proc/") + QByteArray::number(pid);
+    const int        dirfd    = open(procPath.constData(), O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+    if (dirfd < 0) {
+        qDebug() << "readProc: cannot open" << procPath << "errno" << errno;
         return std::nullopt;
     }
 
-    // 2. Try to read Exe (May fail if root/setuid, but that's okay now)
-    info.exe = QFileInfo(QString("/proc/%1/exe").arg(pid)).symLinkTarget();
+    // 1. status — name, ppid, uid/euid (world-readable)
+    const QByteArray status = readProcEntry(dirfd, "status");
+    if (status.isEmpty()) {
+        qDebug() << "readProc: /proc/" << pid << "/status unreadable (pid gone?)";
+        close(dirfd);
+        return std::nullopt;
+    }
+    for (const auto& line : QString::fromUtf8(status).split('\n')) {
+        if (line.startsWith("Name:")) {
+            info.name = line.section(':', 1).trimmed();
+        } else if (line.startsWith("PPid:")) {
+            info.ppid = line.section(':', 1).trimmed().toLongLong();
+        } else if (line.startsWith("Uid:")) {
+            const QStringList parts = line.section(':', 1).simplified().split(' ');
+            if (parts.size() >= 1)
+                info.uid = parts[0].toLongLong();
+            if (parts.size() >= 2)
+                info.euid = parts[1].toLongLong();
+        }
+    }
 
-    // 3. Cmdline
-    QFile fCmd(QString("/proc/%1/cmdline").arg(pid));
-    if (fCmd.open(QIODevice::ReadOnly)) {
-        QByteArray data = fCmd.readAll();
-        fCmd.close();
-        QList<QByteArray> args = data.split('\0');
-        QStringList       cleanArgs;
-        for (const auto& a : args)
+    // 2. exe symlink (may fail for setuid/root targets — non-fatal)
+    {
+        char    buf[4096];
+        ssize_t n = readlinkat(dirfd, "exe", buf, sizeof(buf) - 1);
+        if (n > 0) {
+            buf[n]   = '\0';
+            info.exe = QString::fromUtf8(buf, static_cast<int>(n));
+        }
+    }
+
+    // 3. cmdline (NUL-separated argv)
+    const QByteArray cmdline = readProcEntry(dirfd, "cmdline");
+    if (!cmdline.isEmpty()) {
+        QStringList cleanArgs;
+        for (const auto& a : cmdline.split('\0'))
             if (!a.isEmpty())
                 cleanArgs << QString::fromUtf8(a);
         info.cmdline = cleanArgs.join(" ");
     }
 
+    // 4. starttime — pins process generation; lets callers detect pid reuse across reads
+    info.startTime = parseStartTime(readProcEntry(dirfd, "stat"));
+
+    close(dirfd);
     return info;
 }
 
@@ -191,6 +257,40 @@ DesktopInfo RequestContextHelper::findDesktopForExe(const QString& exePath) {
     return {};
 }
 
+AgentMatch RequestContextHelper::detectAgent(const ProcInfo& proc) {
+    // Curated registry of known AI agent runtimes. Matched case-insensitively against
+    // the cmdline (agents carry their name in argv) or the exe basename. Most agents run
+    // via node/python, so the exe alone ("node") is not enough — the cmdline is. This
+    // list is intentionally small and easy to extend; add a row to support a new agent.
+    struct Signature {
+        const char* kind;
+        const char* displayName;
+        const char* iconName;
+        const char* needle; // substring sought in cmdline / exe (lowercased)
+    };
+    static const Signature kSignatures[] = {
+        {"claude-code", "Claude Code", "claude-code", "claude"},
+        {"codex", "Codex CLI", "codex", "codex"},
+        {"gemini-cli", "Gemini CLI", "gemini-cli", "gemini"},
+        {"aider", "Aider", "aider", "aider"},
+        {"cursor-agent", "Cursor Agent", "cursor-agent", "cursor-agent"},
+        {"opencode", "OpenCode", "opencode", "opencode"},
+        {"copilot-cli", "Copilot CLI", "copilot", "copilot"},
+    };
+
+    const QString haystack = (proc.cmdline + " " + proc.exe).toLower();
+    if (haystack.trimmed().isEmpty()) {
+        return {};
+    }
+
+    for (const auto& sig : kSignatures) {
+        if (haystack.contains(QLatin1String(sig.needle))) {
+            return AgentMatch{QString::fromLatin1(sig.kind), QString::fromLatin1(sig.displayName), QString::fromLatin1(sig.iconName)};
+        }
+    }
+    return {};
+}
+
 ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subject, qint64 agentUid) {
     return resolveRequestorFromSubject(subject, agentUid, [](qint64 pid) { return readProc(pid); });
 }
@@ -233,6 +333,20 @@ ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subj
             actor.proc = *info;
         }
 
+        // Agent attribution wins over a desktop match: for `pkexec -> node(claude) ->
+        // terminal` we want "Claude Code", not the terminal emulator. Check the agent
+        // registry before .desktop matching and stop at the first recognized agent.
+        if (const AgentMatch agent = detectAgent(*info); agent.isValid()) {
+            actor.proc        = *info;
+            actor.isAgent     = true;
+            actor.agentKind   = agent.kind;
+            actor.displayName = agent.displayName;
+            actor.iconName    = agent.iconName;
+            actor.confidence  = "agent";
+            qDebug() << "Requestor resolution: matched agent" << agent.kind << "at pid" << info->pid;
+            break;
+        }
+
         DesktopInfo d;
         if (!info->exe.isEmpty()) {
             d = findDesktopForExe(info->exe);
@@ -258,12 +372,14 @@ ActorInfo RequestContextHelper::resolveRequestorFromSubject(const ProcInfo& subj
         hops++;
     }
 
-    if (!actor.desktop.isValid()) {
+    if (!actor.isAgent && !actor.desktop.isValid()) {
         actor.confidence = actor.proc.exe.isEmpty() ? (actor.proc.name.isEmpty() ? "unknown" : "name-only") : "exe-only";
     }
 
-    // Fill display names
-    if (actor.desktop.isValid()) {
+    // Fill display names (agent attribution already set displayName/iconName above)
+    if (actor.isAgent) {
+        // keep agent-resolved displayName/iconName
+    } else if (actor.desktop.isValid()) {
         actor.displayName = actor.desktop.name;
         actor.iconName    = actor.desktop.iconName;
     } else if (!actor.proc.exe.isEmpty()) {

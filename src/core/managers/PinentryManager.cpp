@@ -317,9 +317,13 @@ std::pair<int, int> PinentryManager::resolveRetryInfo(const PinentryRequest& req
 }
 
 bool PinentryManager::validateResultOwner(const QString& cookie, pid_t peerPid) const {
+    // Fail closed: a result for a cookie with no recorded owner is rejected. Every
+    // legitimate flow records its owner in handleRequest before any result can arrive, so
+    // an unknown cookie means no prior request from this (or any) peer — a forged result
+    // attempting to drive a session it does not own (F3).
     auto ownerIt = m_flowOwners.find(cookie);
     if (ownerIt == m_flowOwners.end()) {
-        return true;
+        return false;
     }
 
     return ownerIt.value() == peerPid;

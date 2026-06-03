@@ -15,7 +15,17 @@ namespace bb::agent {
         QString kind;
         int     priority        = 0;
         qint64  lastHeartbeatMs = 0;
+        // True only when the registering peer was proven to be a daemon-launched process
+        // (see ProviderTrustStore). Untrusted providers may register but can never become
+        // active or be authorized to receive secrets.
+        bool    trusted = false;
     };
+
+    // Lowest/highest priority a provider may request. Priority drives active-provider
+    // selection, so an unbounded value would let any registration force itself active;
+    // requests are clamped into this range. Matches PROVIDER_CONTRACT.md.
+    inline constexpr int PROVIDER_PRIORITY_MIN = -1000;
+    inline constexpr int PROVIDER_PRIORITY_MAX = 1000;
 
     class ProviderRegistry {
       public:
@@ -24,7 +34,10 @@ namespace bb::agent {
         ProviderRegistry();
         explicit ProviderRegistry(NowFn nowFn);
 
-        UIProvider           registerProvider(QLocalSocket* socket, const QJsonObject& msg);
+        // trusted: whether the registering peer was attested as daemon-launched. Trust is
+        // sticky across re-registration on the same socket (a provider cannot lose trust
+        // by re-sending ui.register, nor gain it without a fresh attestation).
+        UIProvider           registerProvider(QLocalSocket* socket, const QJsonObject& msg, bool trusted);
         bool                 heartbeat(QLocalSocket* socket);
         bool                 unregisterProvider(QLocalSocket* socket);
         bool                 removeSocket(QLocalSocket* socket);

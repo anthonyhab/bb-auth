@@ -11,11 +11,13 @@ int runProviderManifestTests(int argc, char** argv);
 int runProviderDiscoveryTests(int argc, char** argv);
 int runProviderLauncherTests(int argc, char** argv);
 int runProviderConformanceTests(int argc, char** argv);
+int runProviderTrustTests(int argc, char** argv);
 int runTextNormalizeTests(int argc, char** argv);
 int runSessionStoreTests(int argc, char** argv);
 int runClassifyRequestTests(int argc, char** argv);
 int runPromptExtractorsTests(int argc, char** argv);
 int runRequestContextTests(int argc, char** argv);
+int runIntentStoreTests(int argc, char** argv);
 
 class SessionInfoTest : public QObject {
     Q_OBJECT
@@ -83,11 +85,13 @@ int main(int argc, char** argv) {
     const int       classifyResult       = runClassifyRequestTests(argc, argv);
     const int       extractorsResult     = runPromptExtractorsTests(argc, argv);
     const int       requestContextResult = runRequestContextTests(argc, argv);
+    const int       intentStoreResult    = runIntentStoreTests(argc, argv);
     const int       normalizeResult      = runTextNormalizeTests(argc, argv);
     const int       manifestResult       = runProviderManifestTests(argc, argv);
     const int       discoveryResult      = runProviderDiscoveryTests(argc, argv);
     const int       launcherResult       = runProviderLauncherTests(argc, argv);
     const int       conformanceResult    = runProviderConformanceTests(argc, argv);
+    const int       trustResult          = runProviderTrustTests(argc, argv);
     const int       ipcContractResult    = runIpcContractTests(argc, argv);
     if (sessionResult != 0) {
         return sessionResult;
@@ -113,6 +117,9 @@ int main(int argc, char** argv) {
     if (requestContextResult != 0) {
         return requestContextResult;
     }
+    if (intentStoreResult != 0) {
+        return intentStoreResult;
+    }
     if (normalizeResult != 0) {
         return normalizeResult;
     }
@@ -127,6 +134,9 @@ int main(int argc, char** argv) {
     }
     if (conformanceResult != 0) {
         return conformanceResult;
+    }
+    if (trustResult != 0) {
+        return trustResult;
     }
     return ipcContractResult;
 }

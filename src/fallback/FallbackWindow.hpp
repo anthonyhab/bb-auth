@@ -57,6 +57,7 @@ namespace bb {
         QLabel*            m_titleLabel          = nullptr;
         QLabel*            m_summaryLabel        = nullptr;
         QLabel*            m_requestorLabel      = nullptr;
+        QLabel*            m_reasonLabel         = nullptr;
         QLabel*            m_contextLabel        = nullptr;
         QPushButton*       m_contextToggleButton = nullptr;
         QLabel*            m_promptLabel         = nullptr;

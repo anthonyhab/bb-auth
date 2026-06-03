@@ -73,6 +73,10 @@ namespace bb {
                 return m_client;
             }
 
+            bb::IpcServer& server() {
+                return m_server;
+            }
+
             QJsonObject readJsonLine(int timeoutMs = 1000) {
                 QByteArray   line;
                 QElapsedTimer timer;
@@ -116,6 +120,7 @@ namespace bb {
         void missingType_returnsError();
         void unknownType_returnsError();
         void oversizedBufferedInput_disconnectsClient();
+        void incompleteFrame_disconnectsAfterTimeout();
     };
 
     void IpcContractTest::invalidJson_returnsError() {
@@ -170,6 +175,22 @@ namespace bb {
         QVERIFY(socket.waitForBytesWritten(1000));
 
         QTRY_COMPARE(socket.state(), QLocalSocket::UnconnectedState);
+    }
+
+    void IpcContractTest::incompleteFrame_disconnectsAfterTimeout() {
+        IpcContractFixture fixture;
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
+
+        fixture.server().setIncompleteFrameTimeoutMs(60);
+
+        // A frame with no terminating newline that the peer never completes: the slow-drip
+        // attack the timeout defends against (F6).
+        auto& socket = fixture.client();
+        QVERIFY(socket.write("{\"type\":\"ping\"") > 0);
+        QVERIFY(socket.waitForBytesWritten(1000));
+
+        // The server drops the connection once the incomplete frame ages past the timeout.
+        QTRY_COMPARE_WITH_TIMEOUT(socket.state(), QLocalSocket::UnconnectedState, 2000);
     }
 
 } // namespace bb

@@ -11,8 +11,10 @@
 #include "agent/EventQueue.hpp"
 #include "agent/EventRouter.hpp"
 #include "agent/ProviderRegistry.hpp"
+#include "agent/ProviderTrustStore.hpp"
 #include "agent/SessionStore.hpp"
 #include "agent/MessageRouter.hpp"
+#include "agent/IntentStore.hpp"
 #include "ipc/IpcServer.hpp"
 #include "managers/KeyringManager.hpp"
 #include "managers/PinentryManager.hpp"
@@ -44,12 +46,16 @@ namespace bb {
         void handleUIUnregister(QLocalSocket* socket, const QJsonObject& msg);
         void handleRespond(QLocalSocket* socket, const QJsonObject& msg);
         void handleCancel(QLocalSocket* socket, const QJsonObject& msg);
+        void handleIntentDeclare(QLocalSocket* socket, const QJsonObject& msg);
 
         bool isAuthorizedProviderSocket(QLocalSocket* socket) const;
         bool hasActiveProvider() const;
         void pruneStaleProviders();
         void emitProviderStatus();
-        void ensureFallbackUiRunning(const QString& reason);
+        // eager: bring a resident autostart provider up even with no pending session
+        // (daemon startup, provider death). On-demand (eager=false) launches only when a
+        // session is waiting and may fall back to the built-in UI.
+        void ensureFallbackUiRunning(const QString& reason, bool eager = false);
 
         void onPolkitCompleted(bool gainedAuthorization);
 
@@ -77,10 +83,12 @@ namespace bb {
 
         QSharedPointer<CPolkitListener> m_listener;
         bb::agent::ProviderRegistry     m_providerRegistry;
+        bb::agent::ProviderTrustStore   m_providerTrustStore;
         bb::agent::EventQueue           m_eventQueue;
         bb::agent::EventRouter          m_eventRouter;
         bb::agent::SessionStore         m_sessionStore;
         bb::agent::MessageRouter        m_messageRouter;
+        bb::agent::IntentStore          m_intentStore;
         QList<QLocalSocket*>            m_subscribers;
         QTimer                          m_providerMaintenanceTimer;
         QString                         m_socketPath;

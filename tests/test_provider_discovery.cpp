@@ -15,6 +15,7 @@ namespace bb {
         void discoverRespectsDirectoryPrecedenceAndDedupesById();
         void discoverUsesLexicalOrderWithinDirectory();
         void discoverSkipsInvalidManifestsWithWarnings();
+        void discoverSkipsOversizedManifestWithoutReadingIt();
     };
 
     namespace {
@@ -81,6 +82,28 @@ namespace bb {
         QCOMPARE(result.manifests[0].id, QString("good"));
         QVERIFY(std::any_of(result.warnings.begin(), result.warnings.end(),
                             [](const QString& warning) { return warning.contains("Skipping manifest") && warning.contains("exec is required"); }));
+    }
+
+    void ProviderDiscoveryTest::discoverSkipsOversizedManifestWithoutReadingIt() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+
+        const QString dir = temp.path() + "/providers";
+        QVERIFY(QDir().mkpath(dir));
+
+        // A manifest larger than the 64 KiB cap must be skipped before being read into
+        // memory (F6) — even if its content would otherwise parse.
+        QByteArray oversized = R"({"id":"huge","name":"Huge","kind":"fallback","priority":0,"exec":"/bin/true","pad":")";
+        oversized.append(QByteArray(70 * 1024, 'x'));
+        oversized.append("\"}");
+        writeFile(dir + "/huge.json", oversized);
+        writeFile(dir + "/good.json", R"({"id":"good","name":"Good","kind":"fallback","priority":0,"exec":"/bin/true"})");
+
+        const auto result = providers::ProviderDiscovery::discover(QStringList{dir});
+        QCOMPARE(result.manifests.size(), 1);
+        QCOMPARE(result.manifests[0].id, QString("good"));
+        QVERIFY(std::any_of(result.warnings.begin(), result.warnings.end(),
+                            [](const QString& warning) { return warning.contains("huge.json") && warning.contains("exceeds maximum size"); }));
     }
 
 } // namespace bb

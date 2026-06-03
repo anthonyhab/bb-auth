@@ -89,7 +89,7 @@ CAgent::CAgent(QObject* parent) : QObject(parent), m_listener(new CPolkitListene
 #endif
     m_messageRouter.registerHandler(json::VAL_PING, [this](QLocalSocket* socket, const QJsonObject&) {
         QJsonObject       pong{{json::KEY_TYPE, json::VAL_PONG},
-                               {json::KEY_VERSION, "2.0"},
+                               {json::KEY_VERSION, "3.0"},
                                {json::KEY_CAPABILITIES, QJsonArray{json::VAL_POLKIT, json::VAL_KEYRING, json::VAL_PINENTRY, json::VAL_FINGERPRINT, json::VAL_FIDO2}}};
 
         const QJsonObject bootstrap = readBootstrapState();
@@ -117,6 +117,7 @@ CAgent::CAgent(QObject* parent) : QObject(parent), m_listener(new CPolkitListene
     m_messageRouter.registerHandler("ui.unregister", [this](QLocalSocket* socket, const QJsonObject& msg) { handleUIUnregister(socket, msg); });
     m_messageRouter.registerHandler("session.respond", [this](QLocalSocket* socket, const QJsonObject& msg) { handleRespond(socket, msg); });
     m_messageRouter.registerHandler("session.cancel", [this](QLocalSocket* socket, const QJsonObject& msg) { handleCancel(socket, msg); });
+    m_messageRouter.registerHandler("intent.declare", [this](QLocalSocket* socket, const QJsonObject& msg) { handleIntentDeclare(socket, msg); });
 }
 
 CAgent::~CAgent() {}
@@ -160,6 +161,12 @@ bool CAgent::start(QCoreApplication& app, const QString& socketPath) {
     }
 
     std::print("Agent started on {}\n", socketPath.toStdString());
+
+    // Bring the resident provider (highest-priority autostart, e.g. the omarchy prompt)
+    // up now so the first prompt has zero launch latency. No-op when no autostart provider
+    // is configured — the daemon stays fully on-demand in that case.
+    ensureFallbackUiRunning("daemon-startup", /*eager=*/true);
+
     return app.exec() == 0;
 }
 
@@ -179,8 +186,11 @@ void CAgent::onClientDisconnected(QLocalSocket* socket) {
     m_keyringManager.cleanupForSocket(socket);
     m_pinentryManager.cleanupForSocket(socket);
 
-    if (!hasActiveProvider() && !m_sessionStore.empty()) {
-        ensureFallbackUiRunning("provider-disconnected");
+    if (!hasActiveProvider()) {
+        // A waiting session needs UI now (on-demand, may use the built-in fallback). With
+        // nothing pending, keep the resident provider hot by relaunching it eagerly — a
+        // no-op when no autostart provider is configured.
+        ensureFallbackUiRunning("provider-disconnected", /*eager=*/m_sessionStore.empty());
     }
 }
 
@@ -205,9 +215,13 @@ void CAgent::handleSubscribe(QLocalSocket* socket) {
         qDebug() << "Subscriber added, total:" << m_subscribers.size();
     }
 
-    const bool isRegisteredProvider        = m_providerRegistry.contains(socket);
-    const bool isActiveProvider            = isRegisteredProvider && (socket == m_providerRegistry.activeProvider());
-    const bool canReceiveInteractiveEvents = !isRegisteredProvider || isActiveProvider;
+    const bool isRegisteredProvider = m_providerRegistry.contains(socket);
+    const bool isActiveProvider     = isRegisteredProvider && (socket == m_providerRegistry.activeProvider());
+    // Only the trusted active provider may replay open sessions. The active provider is
+    // always daemon-launched and attested (see ProviderRegistry::isAuthorized), so this
+    // never leaks live-session context (prompts, requestor identity) to an arbitrary
+    // same-UID subscriber that merely connected and sent `subscribe` (F4).
+    const bool canReceiveInteractiveEvents = isActiveProvider;
 
     if (canReceiveInteractiveEvents) {
         for (const auto& [cookie, session] : m_sessionStore.sessions()) {
@@ -242,8 +256,14 @@ void CAgent::handlePinentryResult(QLocalSocket* socket, const QJsonObject& msg) 
 }
 
 void CAgent::handleUIRegister(QLocalSocket* socket, const QJsonObject& msg) {
-    const auto provider              = m_providerRegistry.registerProvider(socket, msg);
-    const bool activeProviderChanged = m_providerRegistry.recomputeActiveProvider();
+    // Attest the peer against the daemon's launch records: a registration is trusted only
+    // if its kernel-attested SO_PEERCRED pid matches a process the daemon launched. The
+    // match is single-use, so an attacker cannot re-use a launch by racing the real
+    // provider. Untrusted registrations are accepted but can never become active (F1/F2).
+    const pid_t peerPid              = bb::IpcServer::getPeerPid(socket);
+    const bool  trusted              = m_providerTrustStore.consumeTrust(peerPid);
+    const auto  provider             = m_providerRegistry.registerProvider(socket, msg, trusted);
+    const bool  activeProviderChanged = m_providerRegistry.recomputeActiveProvider();
     const bool nowActive             = socket == m_providerRegistry.activeProvider();
 
     m_ipcServer.sendJson(
@@ -388,6 +408,51 @@ void CAgent::emitSessionEvent(const QJsonObject& event) {
     m_eventRouter.route(event, m_subscribers, [this](QLocalSocket* socket, const QJsonObject& routedEvent) { m_ipcServer.sendJson(socket, routedEvent); });
 }
 
+void CAgent::handleIntentDeclare(QLocalSocket* socket, const QJsonObject& msg) {
+    // Display-sanity bounds; the 64 KiB frame limit already caps the raw input.
+    constexpr int kMaxReason  = 2000;
+    constexpr int kMaxCommand = 512;
+
+    const pid_t   peerPid = m_ipcServer.getPeerPid(socket);
+    if (peerPid <= 0) {
+        m_ipcServer.sendJson(socket, QJsonObject{{json::KEY_TYPE, json::VAL_ERROR}, {json::KEY_MESSAGE, "Cannot determine peer"}});
+        return;
+    }
+
+    // The binding is the declarer's OS-resolved agent ancestry — NOT the self-asserted
+    // "agent" field in the message. Both the declarer (hook/MCP) and the eventual polkit
+    // subject descend from the same agent process; that shared pid+start-time is what
+    // correlates them. A declarer with no agent ancestry cannot be correlated.
+    qint64 agentRootPid   = 0;
+    qint64 agentStartTime = 0;
+    if (auto proc = RequestContextHelper::readProc(peerPid)) {
+        auto actor = RequestContextHelper::resolveRequestorFromSubject(*proc, getuid());
+        if (actor.isAgent) {
+            agentRootPid   = actor.proc.pid;
+            agentStartTime = actor.proc.startTime;
+        }
+    }
+
+    if (agentRootPid <= 0) {
+        m_ipcServer.sendJson(socket, QJsonObject{{json::KEY_TYPE, json::VAL_OK}, {"bound", false}});
+        return;
+    }
+
+    bb::agent::PendingIntent intent;
+    intent.reason         = msg.value("reason").toString().left(kMaxReason);
+    intent.declaredAgent  = msg.value("agent").toString().left(64);
+    intent.command        = msg.value("command").toString().left(kMaxCommand);
+    intent.cwd            = msg.value("cwd").toString().left(kMaxCommand);
+    intent.channel        = msg.value("channel").toString().left(16);
+    intent.agentRootPid   = agentRootPid;
+    intent.agentStartTime = agentStartTime;
+
+    const qint64 ttlMs = static_cast<qint64>(msg.value("ttlMs").toDouble(0));
+    m_intentStore.declare(std::move(intent), ttlMs);
+
+    m_ipcServer.sendJson(socket, QJsonObject{{json::KEY_TYPE, json::VAL_OK}, {"bound", true}});
+}
+
 bool CAgent::onPolkitRequest(const QString& cookie, const QString& message, [[maybe_unused]] const QString& iconName, const QString& actionId, const QString& user,
                              const PolkitQt1::Details& details) {
     qDebug() << "POLKIT REQUEST" << cookie;
@@ -397,7 +462,10 @@ bool CAgent::onPolkitRequest(const QString& cookie, const QString& message, [[ma
     ctx.actionId = actionId;
     ctx.user     = user;
 
-    auto pid = RequestContextHelper::extractSubjectPid(details);
+    qint64 subjectAgentPid       = 0;
+    qint64 subjectAgentStartTime = 0;
+
+    auto   pid = RequestContextHelper::extractSubjectPid(details);
     if (pid) {
         auto proc = RequestContextHelper::readProc(*pid);
         if (proc) {
@@ -407,6 +475,12 @@ bool CAgent::onPolkitRequest(const QString& cookie, const QString& message, [[ma
             ctx.requestor.fallbackLetter = actor.fallbackLetter;
             ctx.requestor.fallbackKey    = actor.fallbackKey;
             ctx.requestor.pid            = *pid;
+            ctx.requestor.isAgent        = actor.isAgent;
+            ctx.requestor.agentKind      = actor.agentKind;
+            if (actor.isAgent) {
+                subjectAgentPid       = actor.proc.pid;
+                subjectAgentStartTime = actor.proc.startTime;
+            }
         }
     }
 
@@ -414,6 +488,20 @@ bool CAgent::onPolkitRequest(const QString& cookie, const QString& message, [[ma
         ctx.requestor.name           = "Unknown";
         ctx.requestor.fallbackLetter = "?";
         ctx.requestor.fallbackKey    = "unknown";
+    }
+
+    // Correlate a declared intent (hook/MCP) to this request via shared agent ancestry.
+    // Display/audit only — it never affects the decision. mismatch flags a declared agent
+    // id that disagrees with the OS-resolved one.
+    if (subjectAgentPid > 0) {
+        if (auto intent = m_intentStore.consumeForAgent(subjectAgentPid, subjectAgentStartTime)) {
+            ctx.intent.reason        = intent->reason;
+            ctx.intent.declaredAgent = intent->declaredAgent;
+            ctx.intent.channel       = intent->channel;
+            ctx.intent.mismatch      = !intent->declaredAgent.isEmpty() && !ctx.requestor.agentKind.isEmpty() &&
+                intent->declaredAgent.compare(ctx.requestor.agentKind, Qt::CaseInsensitive) != 0;
+            qDebug() << "Correlated declared intent for agent pid" << subjectAgentPid << "channel" << intent->channel;
+        }
     }
 
     if (!createSession(cookie, bb::Session::Source::Polkit, ctx)) {
@@ -567,7 +655,7 @@ void CAgent::emitProviderStatus() {
     }
 }
 
-void CAgent::ensureFallbackUiRunning(const QString& reason) {
+void CAgent::ensureFallbackUiRunning(const QString& reason, bool eager) {
     if (hasActiveProvider()) {
         return;
     }
@@ -604,10 +692,13 @@ void CAgent::ensureFallbackUiRunning(const QString& reason) {
     const QString legacyOverride    = QString::fromLocal8Bit(qgetenv("BB_AUTH_FALLBACK_PATH"));
     const QString legacyDefaultPath = QCoreApplication::applicationDirPath() + "/bb-auth-fallback";
 
-    const auto    launch = m_providerLauncher.tryLaunch(discovery.manifests, m_socketPath, reason, hasActiveProvider(), !m_sessionStore.empty(), legacyOverride, legacyDefaultPath);
+    const auto    launch = m_providerLauncher.tryLaunch(discovery.manifests, m_socketPath, reason, hasActiveProvider(), !m_sessionStore.empty(), legacyOverride, legacyDefaultPath, eager);
 
     if (launch.launched) {
         m_lastFallbackLaunchMs = nowMs;
+        // Anchor trust: only a process the daemon launched may later become the active
+        // provider that receives the user's secret (see ProviderTrustStore + F1/F2).
+        m_providerTrustStore.recordLaunch(launch.launchedPid);
         qInfo() << "Provider launch:" << launch.detail << "id=" << launch.providerId << "exec=" << launch.executable;
         return;
     }

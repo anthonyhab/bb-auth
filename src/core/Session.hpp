@@ -30,12 +30,32 @@ namespace bb {
             QString fallbackLetter;
             QString fallbackKey;
             qint64  pid{0};
+            // OS-resolved identity — the trust anchor. Set when the resolved process
+            // is recognized as an AI agent runtime (see RequestContext agent registry).
+            bool    isAgent{false};
+            QString agentKind; // e.g. "claude-code" (empty when not an agent)
+        };
+
+        // Declared intent from a privileged-command actor (hook or MCP). This is
+        // self-asserted and untrusted: it is surfaced for human display/audit ONLY and
+        // MUST NOT influence the allow/deny decision. Kept separate from Requestor so
+        // the wire format keeps OS-truth and declaration legibly distinct.
+        struct Intent {
+            QString reason;        // why the command is being run
+            QString declaredAgent; // agent id the declarer claimed (untrusted)
+            QString channel;       // "hook" | "mcp"
+            bool    mismatch{false}; // declaredAgent disagrees with OS-resolved agentKind
+
+            [[nodiscard]] bool isValid() const {
+                return !reason.isEmpty() || !declaredAgent.isEmpty();
+            }
         };
 
         struct Context {
             // Common fields
             QString   message;
             Requestor requestor;
+            Intent    intent;
 
             // Polkit-specific
             QString     actionId;
@@ -93,6 +113,7 @@ namespace bb {
         [[nodiscard]] static QString sourceToString(Source s);
         [[nodiscard]] static QString resultToString(Result r);
         [[nodiscard]] QJsonObject    requestorToJson() const;
+        [[nodiscard]] QJsonObject    intentToJson() const;
         [[nodiscard]] QJsonObject    contextToJson() const;
     };
 

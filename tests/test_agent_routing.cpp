@@ -109,7 +109,7 @@ namespace bb {
         void eventQueue_removeWaiterPreventsSend();
 
         void eventRouter_routesSessionEventsToActiveProviderOnly();
-        void eventRouter_broadcastsSessionEventsWhenNoActiveProvider();
+        void eventRouter_dropsSessionEventsWhenNoActiveProvider();
         void eventRouter_broadcastsNonSessionEventsEvenWithActiveProvider();
     };
 
@@ -127,10 +127,10 @@ namespace bb {
         QVERIFY(b.server != nullptr);
 
         nowMs = 1000;
-        registry.registerProvider(a.server.get(), QJsonObject{{"name", "a"}, {"kind", "a"}, {"priority", 10}});
+        registry.registerProvider(a.server.get(), QJsonObject{{"name", "a"}, {"kind", "a"}, {"priority", 10}}, true);
 
         nowMs = 2000;
-        registry.registerProvider(b.server.get(), QJsonObject{{"name", "b"}, {"kind", "b"}, {"priority", 20}});
+        registry.registerProvider(b.server.get(), QJsonObject{{"name", "b"}, {"kind", "b"}, {"priority", 20}}, true);
 
         nowMs              = 3000;
         const bool changed = registry.recomputeActiveProvider();
@@ -157,10 +157,10 @@ namespace bb {
         QVERIFY(b.server != nullptr);
 
         nowMs = 1000;
-        registry.registerProvider(a.server.get(), QJsonObject{{"name", "a"}, {"kind", "a"}, {"priority", 10}});
+        registry.registerProvider(a.server.get(), QJsonObject{{"name", "a"}, {"kind", "a"}, {"priority", 10}}, true);
 
         nowMs = 2000;
-        registry.registerProvider(b.server.get(), QJsonObject{{"name", "b"}, {"kind", "b"}, {"priority", 10}});
+        registry.registerProvider(b.server.get(), QJsonObject{{"name", "b"}, {"kind", "b"}, {"priority", 10}}, true);
 
         nowMs = 2500;
         QVERIFY(registry.recomputeActiveProvider());
@@ -188,10 +188,10 @@ namespace bb {
         QVERIFY(b.server != nullptr);
 
         nowMs = 1000;
-        registry.registerProvider(a.server.get(), QJsonObject{{"name", "a"}, {"kind", "a"}, {"priority", 10}});
+        registry.registerProvider(a.server.get(), QJsonObject{{"name", "a"}, {"kind", "a"}, {"priority", 10}}, true);
 
         nowMs = 2000;
-        registry.registerProvider(b.server.get(), QJsonObject{{"name", "b"}, {"kind", "b"}, {"priority", 20}});
+        registry.registerProvider(b.server.get(), QJsonObject{{"name", "b"}, {"kind", "b"}, {"priority", 20}}, true);
 
         nowMs = 3000;
         registry.recomputeActiveProvider();
@@ -226,10 +226,10 @@ namespace bb {
         QVERIFY(b.server != nullptr);
 
         nowMs = 1000;
-        registry.registerProvider(a.server.get(), QJsonObject{{"name", "a"}, {"kind", "a"}, {"priority", 50}});
+        registry.registerProvider(a.server.get(), QJsonObject{{"name", "a"}, {"kind", "a"}, {"priority", 50}}, true);
 
         nowMs = 2000;
-        registry.registerProvider(b.server.get(), QJsonObject{{"name", "b"}, {"kind", "b"}, {"priority", 60}});
+        registry.registerProvider(b.server.get(), QJsonObject{{"name", "b"}, {"kind", "b"}, {"priority", 60}}, true);
 
         nowMs = 3000;
         registry.recomputeActiveProvider();
@@ -359,7 +359,7 @@ namespace bb {
         QVERIFY(waiter.server != nullptr);
 
         nowMs = 1000;
-        registry.registerProvider(provider.server.get(), QJsonObject{{"name", "provider"}, {"kind", "provider"}, {"priority", 50}});
+        registry.registerProvider(provider.server.get(), QJsonObject{{"name", "provider"}, {"kind", "provider"}, {"priority", 50}}, true);
 
         nowMs = 1100;
         registry.recomputeActiveProvider();
@@ -372,14 +372,15 @@ namespace bb {
         router.route(makeEvent("session.created"), subscribers,
                      [&sent](QLocalSocket* socket, const QJsonObject& event) { sent.push_back(SentEvent{socket, event.value("type").toString()}); });
 
-        QCOMPARE(sent.size(), static_cast<size_t>(2));
+        // Session events reach the trusted active provider ONLY — not the `next` waiter,
+        // not any other subscriber (F4).
+        QCOMPARE(sent.size(), static_cast<size_t>(1));
         QCOMPARE(sent[0].socket, provider.server.get());
         QCOMPARE(sent[0].type, QString("session.created"));
-        QCOMPARE(sent[1].socket, waiter.server.get());
-        QCOMPARE(sent[1].type, QString("session.created"));
+        QVERIFY(std::none_of(sent.begin(), sent.end(), [&](const SentEvent& e) { return e.socket == waiter.server.get(); }));
     }
 
-    void AgentRoutingTest::eventRouter_broadcastsSessionEventsWhenNoActiveProvider() {
+    void AgentRoutingTest::eventRouter_dropsSessionEventsWhenNoActiveProvider() {
         LocalSocketFixture fixture;
         REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
 
@@ -404,10 +405,10 @@ namespace bb {
         router.route(makeEvent("session.updated"), subscribers,
                      [&sent](QLocalSocket* socket, const QJsonObject& event) { sent.push_back(SentEvent{socket, event.value("type").toString()}); });
 
-        QCOMPARE(sent.size(), static_cast<size_t>(3));
-        QCOMPARE(sent[0].socket, sub1.server.get());
-        QCOMPARE(sent[1].socket, sub2.server.get());
-        QCOMPARE(sent[2].socket, waiter.server.get());
+        // With no trusted active provider, a session event is delivered to no one — it is
+        // never broadcast to subscribers nor handed to `next` waiters (F4). The provider
+        // that eventually registers replays open sessions from the session store instead.
+        QVERIFY(sent.empty());
     }
 
     void AgentRoutingTest::eventRouter_broadcastsNonSessionEventsEvenWithActiveProvider() {
@@ -432,7 +433,7 @@ namespace bb {
         QVERIFY(waiter.server != nullptr);
 
         nowMs = 1000;
-        registry.registerProvider(provider.server.get(), QJsonObject{{"name", "provider"}, {"kind", "provider"}, {"priority", 50}});
+        registry.registerProvider(provider.server.get(), QJsonObject{{"name", "provider"}, {"kind", "provider"}, {"priority", 50}}, true);
 
         nowMs = 1100;
         registry.recomputeActiveProvider();

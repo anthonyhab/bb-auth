@@ -13,6 +13,8 @@ namespace bb {
         void fallsBackToLegacyBinaryWhenNoManifestCandidate();
         void appliesBackoffAfterFailedLaunch();
         void skipsLaunchWhenActiveProviderOrNoSessions();
+        void eagerLaunchesAutostartProviderWithNoPendingSessions();
+        void eagerNeverFallsBackToLegacyBinary();
     };
 
     void ProviderLauncherTest::usesLegacyEnvOverrideWhenSet() {
@@ -26,7 +28,7 @@ namespace bb {
                                                  launchedProgram = program;
                                                  launchedArgs    = args;
                                                  launchedEnv     = env;
-                                                 return true;
+                                                 return 4242; // launched pid
                                              });
 
         QList<providers::ProviderManifest> manifests;
@@ -56,7 +58,7 @@ namespace bb {
         providers::ProviderLauncher        launcher([&nowMs] { return nowMs; },
                                              [&launchedProgram](const QString& program, const QStringList&, const QProcessEnvironment&) {
                                                  launchedProgram = program;
-                                                 return true;
+                                                 return 4242; // launched pid
                                              });
 
         QList<providers::ProviderManifest> manifests;
@@ -98,7 +100,7 @@ namespace bb {
     void ProviderLauncherTest::fallsBackToLegacyBinaryWhenNoManifestCandidate() {
         qint64                             nowMs = 1000;
 
-        providers::ProviderLauncher        launcher([&nowMs] { return nowMs; }, [](const QString&, const QStringList&, const QProcessEnvironment&) { return true; });
+        providers::ProviderLauncher        launcher([&nowMs] { return nowMs; }, [](const QString&, const QStringList&, const QProcessEnvironment&) { return qint64{4242}; });
 
         QList<providers::ProviderManifest> manifests;
 
@@ -116,7 +118,7 @@ namespace bb {
         providers::ProviderLauncher        launcher([&nowMs] { return nowMs; },
                                              [&attempts](const QString&, const QStringList&, const QProcessEnvironment&) {
                                                  attempts += 1;
-                                                 return false;
+                                                 return qint64{0}; // launch failed
                                              });
 
         QList<providers::ProviderManifest> manifests;
@@ -147,7 +149,7 @@ namespace bb {
         providers::ProviderLauncher        launcher([&nowMs] { return nowMs; },
                                              [&attempts](const QString&, const QStringList&, const QProcessEnvironment&) {
                                                  attempts += 1;
-                                                 return true;
+                                                 return qint64{4242};
                                              });
 
         QList<providers::ProviderManifest> manifests;
@@ -157,6 +159,56 @@ namespace bb {
 
         const auto noSessions = launcher.tryLaunch(manifests, "/tmp/bb-auth.sock", "session-created", false, false, QString(), "/bin/true");
         QVERIFY(!noSessions.attempted);
+
+        QCOMPARE(attempts, 0);
+    }
+
+    void ProviderLauncherTest::eagerLaunchesAutostartProviderWithNoPendingSessions() {
+        qint64                             nowMs = 1000;
+        QString                            launchedProgram;
+
+        providers::ProviderLauncher        launcher([&nowMs] { return nowMs; },
+                                             [&launchedProgram](const QString& program, const QStringList&, const QProcessEnvironment&) {
+                                                 launchedProgram = program;
+                                                 return qint64{4242};
+                                             });
+
+        QList<providers::ProviderManifest> manifests;
+        providers::ProviderManifest        manifest;
+        manifest.id        = "omarchy-prompt";
+        manifest.name      = "Omarchy";
+        manifest.kind      = "quickshell";
+        manifest.priority  = 100;
+        manifest.exec      = "/bin/true";
+        manifest.autostart = true;
+        manifests.push_back(manifest);
+
+        // No active provider, NO pending sessions — on-demand would skip, but eager launches.
+        const auto result = launcher.tryLaunch(manifests, "/tmp/bb-auth.sock", "daemon-startup", false, false, QString(), "/bin/false", /*eager=*/true);
+
+        QVERIFY(result.attempted);
+        QVERIFY(result.launched);
+        QCOMPARE(result.providerId, QString("omarchy-prompt"));
+        QCOMPARE(launchedProgram, QString("/bin/true"));
+    }
+
+    void ProviderLauncherTest::eagerNeverFallsBackToLegacyBinary() {
+        qint64                             nowMs    = 1000;
+        int                                attempts = 0;
+
+        providers::ProviderLauncher        launcher([&nowMs] { return nowMs; },
+                                             [&attempts](const QString&, const QStringList&, const QProcessEnvironment&) {
+                                                 attempts += 1;
+                                                 return qint64{4242};
+                                             });
+
+        QList<providers::ProviderManifest> manifests; // none configured
+
+        // Eager must never resurrect the legacy env override or the built-in fallback —
+        // those stay on-demand safety nets. With no autostart provider it is a no-op.
+        const auto withLegacyEnv = launcher.tryLaunch(manifests, "/tmp/bb-auth.sock", "daemon-startup", false, false, "/bin/true", "/bin/true", /*eager=*/true);
+        QVERIFY(!withLegacyEnv.attempted);
+        QVERIFY(withLegacyEnv.detail.contains("eager"));
 
         QCOMPARE(attempts, 0);
     }

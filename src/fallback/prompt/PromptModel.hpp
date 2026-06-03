@@ -20,6 +20,11 @@ namespace bb::fallback::prompt {
         QString      requestor;
         QString      details;
         QString      prompt;
+        // Declared intent (display/audit only — never the decision). reason is the
+        // agent-stated justification; intentMismatch flags a declared agent id that
+        // disagrees with the OS-resolved identity.
+        QString      reason;
+        bool         intentMismatch     = false;
         bool         passphrasePrompt   = false;
         bool         allowEmptyResponse = false;
     };

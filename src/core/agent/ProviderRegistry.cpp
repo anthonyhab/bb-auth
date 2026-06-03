@@ -4,6 +4,7 @@
 #include <QLocalSocket>
 #include <QUuid>
 
+#include <algorithm>
 #include <limits>
 #include <utility>
 
@@ -19,7 +20,7 @@ namespace bb::agent {
 
     ProviderRegistry::ProviderRegistry(NowFn nowFn) : m_nowFn(std::move(nowFn)) {}
 
-    UIProvider ProviderRegistry::registerProvider(QLocalSocket* socket, const QJsonObject& msg) {
+    UIProvider ProviderRegistry::registerProvider(QLocalSocket* socket, const QJsonObject& msg, bool trusted) {
         auto& provider = m_uiProviders[socket];
 
         if (provider.id.isEmpty()) {
@@ -36,9 +37,9 @@ namespace bb::agent {
             provider.kind = provider.name;
         }
 
-        const int requestedPriority = msg.value("priority").toInt();
         if (msg.contains("priority")) {
-            provider.priority = requestedPriority;
+            const int requestedPriority = msg.value("priority").toInt();
+            provider.priority           = std::clamp(requestedPriority, PROVIDER_PRIORITY_MIN, PROVIDER_PRIORITY_MAX);
         } else if (provider.kind == "quickshell") {
             provider.priority = 100;
         } else if (provider.kind == "fallback") {
@@ -47,6 +48,9 @@ namespace bb::agent {
             provider.priority = 50;
         }
 
+        // Trust is sticky: once attested, re-registration on the same socket cannot drop
+        // it, and an unattested re-register cannot forge it.
+        provider.trusted         = provider.trusted || trusted;
         provider.lastHeartbeatMs = m_nowFn();
         return provider;
     }
@@ -87,6 +91,14 @@ namespace bb::agent {
                 continue;
             }
 
+            // Only daemon-launched (attested) providers are eligible to become active —
+            // the active provider receives the user's secret. Untrusted registrations
+            // stay in the map (so re-registration can still attest) but are never chosen.
+            if (!provider.trusted) {
+                ++it;
+                continue;
+            }
+
             if (!bestSocket || provider.priority > bestPriority || (provider.priority == bestPriority && provider.lastHeartbeatMs > bestHeartbeat)) {
                 bestSocket    = socket;
                 bestPriority  = provider.priority;
@@ -109,15 +121,16 @@ namespace bb::agent {
     }
 
     bool ProviderRegistry::isAuthorized(QLocalSocket* socket) const {
-        if (m_uiProviders.isEmpty()) {
-            return true;
-        }
-
-        if (!m_uiProviders.contains(socket)) {
+        // Fail closed. There is no legacy "no providers registered → anyone authorized"
+        // window: the daemon launches its own trusted fallback when a session needs a
+        // provider, so the authorized peer is always a daemon-launched, attested, active
+        // provider — never an arbitrary same-UID socket.
+        const auto it = m_uiProviders.constFind(socket);
+        if (it == m_uiProviders.constEnd()) {
             return false;
         }
 
-        return socket == m_activeProvider;
+        return it->trusted && socket == m_activeProvider;
     }
 
     bool ProviderRegistry::hasActiveProvider() const {

@@ -124,6 +124,8 @@ namespace bb {
         void providerRegistry_breaksPriorityTiesByLatestHeartbeat();
         void providerRegistry_prunesStaleProvidersAfterHeartbeatTimeout();
         void providerRegistry_enforcesActiveProviderAuthorizationBoundary();
+        void providerRegistry_untrustedProviderNeverBecomesActiveOrAuthorized();
+        void providerRegistry_clampsRequestedPriority();
         void discovery_honorsDefaultDirectoryPrecedence();
     };
 
@@ -158,24 +160,24 @@ namespace bb {
 
         ConnectedSocket         quickshellSocket = fixture.connect();
         QVERIFY(quickshellSocket.server != nullptr);
-        const auto quickshellProvider = registry.registerProvider(quickshellSocket.server.get(), QJsonObject{{"kind", "quickshell"}});
+        const auto quickshellProvider = registry.registerProvider(quickshellSocket.server.get(), QJsonObject{{"kind", "quickshell"}}, true);
         QCOMPARE(quickshellProvider.name, QString("unknown"));
         QCOMPARE(quickshellProvider.kind, QString("quickshell"));
         QCOMPARE(quickshellProvider.priority, 100);
 
         ConnectedSocket fallbackSocket = fixture.connect();
         QVERIFY(fallbackSocket.server != nullptr);
-        const auto fallbackProvider = registry.registerProvider(fallbackSocket.server.get(), QJsonObject{{"kind", "fallback"}});
+        const auto fallbackProvider = registry.registerProvider(fallbackSocket.server.get(), QJsonObject{{"kind", "fallback"}}, true);
         QCOMPARE(fallbackProvider.priority, 10);
 
         ConnectedSocket customSocket = fixture.connect();
         QVERIFY(customSocket.server != nullptr);
-        const auto customProvider = registry.registerProvider(customSocket.server.get(), QJsonObject{{"kind", "custom"}});
+        const auto customProvider = registry.registerProvider(customSocket.server.get(), QJsonObject{{"kind", "custom"}}, true);
         QCOMPARE(customProvider.priority, 50);
 
         ConnectedSocket unnamedSocket = fixture.connect();
         QVERIFY(unnamedSocket.server != nullptr);
-        const auto unnamedProvider = registry.registerProvider(unnamedSocket.server.get(), QJsonObject{});
+        const auto unnamedProvider = registry.registerProvider(unnamedSocket.server.get(), QJsonObject{}, true);
         QCOMPARE(unnamedProvider.name, QString("unknown"));
         QCOMPARE(unnamedProvider.kind, QString("unknown"));
         QCOMPARE(unnamedProvider.priority, 50);
@@ -202,9 +204,9 @@ namespace bb {
         QVERIFY(secondSocket.server != nullptr);
 
         nowMs = 1000;
-        registry.registerProvider(firstSocket.server.get(), QJsonObject{{"name", "First"}, {"kind", "custom"}, {"priority", 42}});
+        registry.registerProvider(firstSocket.server.get(), QJsonObject{{"name", "First"}, {"kind", "custom"}, {"priority", 42}}, true);
         nowMs = 2000;
-        registry.registerProvider(secondSocket.server.get(), QJsonObject{{"name", "Second"}, {"kind", "custom"}, {"priority", 42}});
+        registry.registerProvider(secondSocket.server.get(), QJsonObject{{"name", "Second"}, {"kind", "custom"}, {"priority", 42}}, true);
 
         nowMs = 2500;
         QVERIFY(registry.recomputeActiveProvider());
@@ -229,7 +231,7 @@ namespace bb {
         QVERIFY(socket.server != nullptr);
 
         nowMs = 1000;
-        registry.registerProvider(socket.server.get(), QJsonObject{{"name", "Only"}, {"kind", "custom"}, {"priority", 10}});
+        registry.registerProvider(socket.server.get(), QJsonObject{{"name", "Only"}, {"kind", "custom"}, {"priority", 10}}, true);
 
         nowMs = 2000;
         QVERIFY(registry.recomputeActiveProvider());
@@ -255,8 +257,8 @@ namespace bb {
         ConnectedSocket lowPrioritySocket = fixture.connect();
         QVERIFY(lowPrioritySocket.server != nullptr);
 
-        registry.registerProvider(highPrioritySocket.server.get(), QJsonObject{{"name", "High"}, {"kind", "custom"}, {"priority", 90}});
-        registry.registerProvider(lowPrioritySocket.server.get(), QJsonObject{{"name", "Low"}, {"kind", "custom"}, {"priority", 10}});
+        registry.registerProvider(highPrioritySocket.server.get(), QJsonObject{{"name", "High"}, {"kind", "custom"}, {"priority", 90}}, true);
+        registry.registerProvider(lowPrioritySocket.server.get(), QJsonObject{{"name", "Low"}, {"kind", "custom"}, {"priority", 10}}, true);
         QVERIFY(registry.recomputeActiveProvider());
         QCOMPARE(registry.activeProvider(), highPrioritySocket.server.get());
 
@@ -269,7 +271,57 @@ namespace bb {
         QVERIFY(registry.unregisterProvider(lowPrioritySocket.server.get()));
         registry.recomputeActiveProvider();
         QVERIFY(!registry.hasActiveProvider());
-        QVERIFY(registry.isAuthorized(&unknownSocket));
+        QVERIFY(!registry.isAuthorized(&unknownSocket));
+    }
+
+    void ProviderConformanceTest::providerRegistry_untrustedProviderNeverBecomesActiveOrAuthorized() {
+        LocalSocketFixture fixture;
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
+
+        qint64                  nowMs = 1000;
+        agent::ProviderRegistry registry([&nowMs] { return nowMs; });
+
+        // An untrusted (not daemon-launched) peer registers at maximum priority — the
+        // exact provider-hijack attempt F1/F2 defend against.
+        ConnectedSocket attacker = fixture.connect();
+        QVERIFY(attacker.server != nullptr);
+        registry.registerProvider(attacker.server.get(), QJsonObject{{"name", "Attacker"}, {"kind", "custom"}, {"priority", 1000}}, false);
+
+        QVERIFY(registry.contains(attacker.server.get()));
+        registry.recomputeActiveProvider();
+        // It registered, but an untrusted provider can never be selected as active...
+        QVERIFY(!registry.hasActiveProvider());
+        QVERIFY(registry.activeProvider() != attacker.server.get());
+        // ...nor authorized to submit secrets, even though it is the only provider.
+        QVERIFY(!registry.isAuthorized(attacker.server.get()));
+
+        // A trusted, lower-priority provider (the daemon's own fallback) wins over the
+        // higher-priority attacker and is the only one authorized.
+        ConnectedSocket fallback = fixture.connect();
+        QVERIFY(fallback.server != nullptr);
+        registry.registerProvider(fallback.server.get(), QJsonObject{{"name", "Fallback"}, {"kind", "fallback"}, {"priority", 10}}, true);
+        registry.recomputeActiveProvider();
+        QCOMPARE(registry.activeProvider(), fallback.server.get());
+        QVERIFY(registry.isAuthorized(fallback.server.get()));
+        QVERIFY(!registry.isAuthorized(attacker.server.get()));
+    }
+
+    void ProviderConformanceTest::providerRegistry_clampsRequestedPriority() {
+        LocalSocketFixture fixture;
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
+
+        qint64                  nowMs = 1000;
+        agent::ProviderRegistry registry([&nowMs] { return nowMs; });
+
+        ConnectedSocket hi = fixture.connect();
+        QVERIFY(hi.server != nullptr);
+        const auto hiProvider = registry.registerProvider(hi.server.get(), QJsonObject{{"name", "Hi"}, {"kind", "custom"}, {"priority", 2147483647}}, true);
+        QCOMPARE(hiProvider.priority, agent::PROVIDER_PRIORITY_MAX);
+
+        ConnectedSocket lo = fixture.connect();
+        QVERIFY(lo.server != nullptr);
+        const auto loProvider = registry.registerProvider(lo.server.get(), QJsonObject{{"name", "Lo"}, {"kind", "custom"}, {"priority", -2147483647}}, true);
+        QCOMPARE(loProvider.priority, agent::PROVIDER_PRIORITY_MIN);
     }
 
     void ProviderConformanceTest::discovery_honorsDefaultDirectoryPrecedence() {

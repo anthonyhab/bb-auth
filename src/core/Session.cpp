@@ -67,11 +67,38 @@ namespace bb {
         if (m_context.requestor.pid > 0) {
             obj["pid"] = m_context.requestor.pid;
         }
+        if (m_context.requestor.isAgent) {
+            obj["isAgent"] = true;
+        }
+        if (!m_context.requestor.agentKind.isEmpty()) {
+            obj["agentKind"] = m_context.requestor.agentKind;
+        }
+        return obj;
+    }
+
+    QJsonObject Session::intentToJson() const {
+        QJsonObject obj;
+        if (!m_context.intent.reason.isEmpty()) {
+            obj["reason"] = m_context.intent.reason;
+        }
+        if (!m_context.intent.declaredAgent.isEmpty()) {
+            obj["declaredAgent"] = m_context.intent.declaredAgent;
+        }
+        if (!m_context.intent.channel.isEmpty()) {
+            obj["channel"] = m_context.intent.channel;
+        }
+        obj["mismatch"] = m_context.intent.mismatch;
         return obj;
     }
 
     QJsonObject Session::contextToJson() const {
         QJsonObject ctx{{"message", m_context.message}, {"requestor", requestorToJson()}};
+
+        // Declared intent (display/audit only — never the decision). Present for any
+        // source since an agent may also trigger keyring/pinentry prompts.
+        if (m_context.intent.isValid()) {
+            ctx["intent"] = intentToJson();
+        }
 
         switch (m_source) {
             case Source::Polkit:
