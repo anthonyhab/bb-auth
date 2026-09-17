@@ -14,6 +14,7 @@ namespace bb::agent {
 
     IntentStore::IntentStore(NowFn nowFn) : m_nowFn(std::move(nowFn)) {}
 
+    // @lat: [[agent-intent#Intent declaration and correlation]]
     void IntentStore::declare(PendingIntent intent, qint64 ttlMs) {
         // An intent with no agent binding can never be correlated to a subject — drop it
         // rather than let it linger and risk a loose fallback match.

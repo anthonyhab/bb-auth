@@ -1,0 +1,36 @@
+# bb-auth architecture
+
+A Qt6 daemon that routes the user's secret (sudo/polkit password, keyring unlock, pinentry PIN) to a trusted UI provider over a same-UID Unix socket, with a built-in Widgets fallback.
+
+## Daemon core
+
+The daemon owns the IPC socket, the session lifecycle, and every trust decision; providers are thin UI surfaces that never see routing logic.
+
+- `CAgent` (`src/core/Agent.{hpp,cpp}`) — top-level orchestrator: binds the IPC server, tracks the active provider, eager/on-demand provider launches ([[omarchy-prompt#Resident eager launch]]), fails closed when no trusted provider exists.
+- `IpcServer` (`src/core/ipc/`) — `QLocalServer` with `UserAccessOption` (mode 0600): every peer is a same-UID process, which defines the adversary model in [[provider-trust#Provider trust model]].
+- `Session` (`src/core/Session.{hpp,cpp}`) + `agent/SessionStore` — a session is one pending secret request; `session.created`/`session.respond`/`session.cancel` flow over the socket per [[protocol#Provider IPC contract]].
+- `agent/MessageRouter` / `agent/EventRouter` / `agent/EventQueue` — inbound provider messages vs. daemon→provider event delivery. Session events go only to the active provider, never broadcast ([[provider-trust#Event delivery boundary]]).
+
+## Provider stack
+
+Everything under `src/core/providers/` plus the trust stores decides *which* UI may receive the secret; see [[provider-trust#Provider trust model]] for the model itself.
+
+- `ProviderDiscovery` + `ProviderManifest` — find and parse installed provider manifests (`autostart` flag, priority, launch command).
+- `ProviderLauncher` (`src/core/providers/`) — spawns providers (`QProcess::startDetached`), records `{pid, start-time}` launch attestations.
+- `ProviderTrustStore` (`src/core/agent/`) — single-use attestation records matched at `ui.register`.
+- `ProviderRegistry` (`src/core/agent/`) — registered providers, active-provider selection, `isAuthorized` gate for `session.respond`.
+
+## Fallback UI
+
+`src/fallback/` is the built-in Qt **Widgets** prompt the daemon launches when no external provider is configured or none is trusted.
+
+- `FallbackWindow` / `FallbackClient` — the window and its socket client.
+- `fallback/prompt/` — prompt-text extraction and heuristics (`PromptExtractors`, `PromptHeuristics`, `PromptModelBuilder`, `TextNormalize`) that shape polkit's raw action message into the displayed prompt, including the agent attribution band ([[agent-intent#Attribution band]]).
+
+## Entry modes
+
+`src/modes/` selects the daemon's personality at startup: `daemon` (polkit agent), `keyring`, `pinentry`. `src/keyring-prompter/` is the keyring-side prompter client.
+
+## Agent integrations
+
+`integrations/` holds agent-facing glue that is **not** core: `bb-auth-intent-hook` (`integrations/claude-code/`) is the compiled Claude Code `PreToolUse` hook that declares intent and rewrites clean `sudo` → `pkexec` ([[agent-intent#Agent intent surfacing]]).

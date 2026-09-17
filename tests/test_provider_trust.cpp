@@ -33,6 +33,7 @@ namespace bb {
 
     } // namespace
 
+    // @lat: [[tests#Provider trust#Trusts launched peer by pid and start-time]]
     void ProviderTrustStoreTest::trustsLaunchedPeerWithMatchingStartTime() {
         qint64        nowMs = 1000;
         FakeStartTimes starts{{{4242, 555}}};
@@ -43,6 +44,7 @@ namespace bb {
         QVERIFY(store.consumeTrust(4242));
     }
 
+    // @lat: [[tests#Provider trust#Rejects unknown peer]]
     void ProviderTrustStoreTest::rejectsUnknownPeer() {
         qint64        nowMs = 1000;
         FakeStartTimes starts{{{4242, 555}, {9999, 777}}};
@@ -55,6 +57,7 @@ namespace bb {
         QVERIFY(!store.consumeTrust(0));
     }
 
+    // @lat: [[tests#Provider trust#Recycled pid fails closed]]
     void ProviderTrustStoreTest::rejectsRecycledPidWithDifferentStartTime() {
         qint64        nowMs = 1000;
         FakeStartTimes starts{{{4242, 555}}};
@@ -68,6 +71,7 @@ namespace bb {
         QVERIFY(!store.consumeTrust(4242));
     }
 
+    // @lat: [[tests#Provider trust#Trust attestation is single-use]]
     void ProviderTrustStoreTest::trustIsSingleUse() {
         qint64        nowMs = 1000;
         FakeStartTimes starts{{{4242, 555}}};

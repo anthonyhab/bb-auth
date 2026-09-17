@@ -44,3 +44,13 @@ build-daemon-smoke.log
 result
 
 compile_commands.json
+.claude
+.mcp.json
+.pi
+.cursor
+.opencode
+.codex
+.devin
+.gemini
+
+lat.md/.cache/

@@ -120,6 +120,7 @@ namespace bb::agent {
         return recomputeActiveProvider();
     }
 
+    // @lat: [[provider-trust#Fail-closed authorization]]
     bool ProviderRegistry::isAuthorized(QLocalSocket* socket) const {
         // Fail closed. There is no legacy "no providers registered → anyone authorized"
         // window: the daemon launches its own trusted fallback when a session needs a

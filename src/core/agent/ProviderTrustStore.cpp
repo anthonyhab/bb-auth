@@ -39,6 +39,7 @@ namespace bb::agent {
         m_launched[pid] = Entry{startTime, nowMs};
     }
 
+    // @lat: [[provider-trust#Daemon-launch attestation]]
     bool ProviderTrustStore::consumeTrust(qint64 peerPid) {
         if (peerPid <= 0) {
             return false;

@@ -32,6 +32,7 @@ namespace bb::providers {
     ProviderLauncher::ProviderLauncher(NowFn nowFn, StartProcessFn startProcessFn) :
         m_nowFn(nowFn ? std::move(nowFn) : defaultNowMs), m_startProcessFn(startProcessFn ? std::move(startProcessFn) : defaultStartProcess) {}
 
+    // @lat: [[omarchy-prompt#Resident eager launch]]
     LaunchAttemptResult ProviderLauncher::tryLaunch(const QList<ProviderManifest>& manifests, const QString& socketPath, const QString& reason, bool hasActiveProvider,
                                                     bool hasPendingSessions, const QString& legacyFallbackPath, const QString& defaultFallbackPath, bool eager) {
         LaunchAttemptResult result;

@@ -95,6 +95,7 @@ namespace {
 
     // Fire the declare to the daemon and drain one reply (so it can resolve our peer
     // creds before we close). Silent on any failure — the command still runs.
+    // @lat: [[agent-intent#PreToolUse hook channel]]
     void declareIntent(const QJsonObject &payload) {
         const QByteArray path = socketPath().toLocal8Bit();
         sockaddr_un addr{};
@@ -122,6 +123,7 @@ namespace {
     // compound or option-bearing: pkexec's flags and minimal environment differ
     // from sudo's, so rewriting those could change behaviour. They still get intent
     // declared; they just run unchanged.
+    // @lat: [[agent-intent#sudo to pkexec rewrite]]
     bool simpleSudoRewrite(const QString &command, QString *rewritten) {
         static const QRegularExpression meta(QStringLiteral("[|&;<>`$()\\n]"));
         const QString trimmed = command.trimmed();

@@ -29,6 +29,7 @@ class IntentStoreTest : public QObject {
     void unboundIntentIgnored();
 };
 
+// @lat: [[tests#Intent correlation#Correlates by resolved agent and start-time]]
 void IntentStoreTest::correlatesByAgentAndStartTime() {
     IntentStore store([this] { return m_now; });
     store.declare(make(101, 55555, "remove duplicate desktop file"), 20000);
@@ -38,6 +39,7 @@ void IntentStoreTest::correlatesByAgentAndStartTime() {
     QCOMPARE(got->reason, QString("remove duplicate desktop file"));
 }
 
+// @lat: [[tests#Intent correlation#Start-time mismatch fails closed]]
 void IntentStoreTest::startTimeMismatchFailsClosed() {
     // Same pid number, different generation (pid reuse) must NOT match.
     IntentStore store([this] { return m_now; });
@@ -54,6 +56,7 @@ void IntentStoreTest::wrongAgentPidNoMatch() {
     QVERIFY(!store.consumeForAgent(202, 55555).has_value());
 }
 
+// @lat: [[tests#Intent correlation#Consume is one-shot]]
 void IntentStoreTest::consumeIsOneShot() {
     IntentStore store([this] { return m_now; });
     store.declare(make(101, 55555, "once"), 20000);
@@ -81,6 +84,7 @@ void IntentStoreTest::latestDeclarationWinsPerAgent() {
     QCOMPARE(got->reason, QString("second"));
 }
 
+// @lat: [[tests#Intent correlation#Unbound intent ignored]]
 void IntentStoreTest::unboundIntentIgnored() {
     IntentStore store([this] { return m_now; });
     store.declare(make(0, 0, "no agent binding"), 20000);
