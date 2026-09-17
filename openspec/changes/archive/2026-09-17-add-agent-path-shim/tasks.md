@@ -43,7 +43,7 @@
 
 - [x] 4.1 `./scripts/gate-local.sh` green (build + tests + install + daemon
   smoke). Verify: script exits 0.
-- [ ] 4.2 Manual smoke on live session: prepend shim dir, run `sudo true` as a
+- [x] 4.2 Manual smoke on live session: prepend shim dir, run `sudo true` as a
   human (transparent), then under a simulated agent ancestor run `sudo true`
   (bb-auth prompt with generic reason + `channel: "shim"`). Verify: both paths
   behave per spec.

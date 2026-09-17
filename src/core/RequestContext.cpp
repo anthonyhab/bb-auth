@@ -287,6 +287,10 @@ AgentMatch RequestContextHelper::detectAgent(const ProcInfo& proc) {
         {"gh-copilot", "copilot-cli", "Copilot CLI", "copilot-cli"},
         {"devin", "devin", "Devin", "devin"},
         {"devin-cli", "devin", "Devin", "devin"},
+        // pi runs as `node …/pi-coding-agent/…/cli.js`; the package dir is the
+        // signature. Bare `pi` is deliberately absent — it collides with the
+        // unrelated Debian `pi` utility of the same name.
+        {"pi-coding-agent", "pi", "pi", "pi"},
     };
     static const char* kScriptExts[] = {".js", ".mjs", ".cjs", ".py", ".exe", ".cmd"};
 

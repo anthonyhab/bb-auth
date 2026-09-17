@@ -108,9 +108,9 @@ More troubleshooting:
 
 ## Agent Supervision (AI agents)
 
-When an AI agent (Claude Code, Gemini CLI, opencode, Devin, …) runs a privileged
-command, bb-auth shows **who** is asking and — when declared — **why**, with an
-"AI agent" badge on the prompt.
+When an AI agent (Claude Code, Codex, Gemini CLI, opencode, pi, Devin, …) runs
+a privileged command, bb-auth shows **who** is asking and — when declared —
+**why**, with an "AI agent" badge on the prompt.
 
 Three channels, in order of reliability:
 
@@ -127,9 +127,10 @@ Three channels, in order of reliability:
   prompt even if the agent never declared anything.
 
 - **Harness hooks:** a compiled `PreToolUse`/`BeforeTool` hook
-  (`integrations/hooks/`) covers Claude Code, Devin, and Gemini CLI, and can
+  (`integrations/hooks/`) covers Claude Code, Codex CLI, Devin, and Gemini CLI;
+  opencode and pi get a native plugin/extension (`integrations/`). These can
   carry the agent's real rationale to the prompt where the harness exposes a
-  transcript.
+  transcript or session state.
 
 - **Skill / manual:** agents can wrap commands directly:
   `bb-auth-declare --reason "why" -- sudo CMD`.

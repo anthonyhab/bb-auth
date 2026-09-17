@@ -120,6 +120,34 @@ Gemini does not expose a transcript path, so the reason falls back to
 "(no rationale captured)" — the escalation is still attributed, routed through
 pkexec, and the agent is identified by ancestry.
 
+### Codex CLI
+
+Codex's `PreToolUse` hooks reuse the Claude payload shape and add codex-specific
+fields (`turn_id`, `matcher_aliases`), which the hook uses to tell them apart.
+`~/.codex/hooks.json` (or `<repo>/.codex/hooks.json`):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "/usr/libexec/bb-auth-intent-hook" }
+        ] }
+    ]
+  }
+}
+```
+
+The matcher also covers unified `exec_command` calls via `matcher_aliases`.
+Rewrites merge through `hookSpecificOutput.updatedInput` gated on
+`permissionDecision: "allow"`.
+
+**Trust review:** codex skips non-managed hooks until you approve them — after
+installing, run `/hooks` in the CLI and trust the hook definition (changed
+hook content re-triggers review). For vetted automation,
+`codex --dangerously-bypass-hook-trust` skips the check for that invocation.
+
 ### opencode
 
 opencode has a plugin API instead of hook commands. Install the plugin into
@@ -138,7 +166,30 @@ upstream bug where `output.args` mutations do not propagate — if the rewrite
 does not take effect, the declaration still lands and the PATH shims remain
 the reliable fallback.
 
-### Others (codex, aider, …)
+### pi
+
+pi extensions are TypeScript/JavaScript modules loaded by jiti. Install the
+extension into `~/.pi/agent/extensions/` (global) or `.pi/extensions/`
+(project-local), then `/reload`:
+
+```bash
+mkdir -p ~/.pi/agent/extensions
+cp /usr/share/bb-auth/integrations/pi/bb-auth-extension.ts \
+   ~/.pi/agent/extensions/
+```
+
+The extension hooks `tool_call` on the `bash` tool: it declares intent
+(extracting the last assistant message via `ctx.sessionManager` for a real
+reason) and rewrites a clean leading `sudo`/`doas` by mutating
+`event.input.command` in place — only when the daemon acknowledges.
+
+Note on detection: pi is recognized by the `pi-coding-agent` npm package dir
+in the process cmdline, not the bare `pi` binary name (which collides with an
+unrelated Debian utility). If pi runs under a different wrapper, its ancestor
+name may not resolve — the declare still binds to whatever agent ancestry the
+daemon sees.
+
+### Others (aider, cursor-agent, …)
 
 No hook format — use the PATH shims (`bb-auth-declare --print-shim-dir`, see
 README → Agent Supervision) or the voluntary `bb-auth-declare` CLI.

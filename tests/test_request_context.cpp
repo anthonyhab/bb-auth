@@ -188,6 +188,23 @@ void RequestContextTest::testAgentDetectedFromCmdline() {
     const AgentMatch m4 = RequestContextHelper::detectAgent(optClaude);
     QVERIFY(m4.isValid());
     QCOMPARE(m4.kind, QString("claude-code"));
+
+    // pi matches on its npm package dir segment (`node …/pi-coding-agent/…`);
+    // a bare `pi` process must NOT match — the name collides with the Debian
+    // `pi` utility.
+    ProcInfo piProc;
+    piProc.name    = "node";
+    piProc.exe     = "/usr/bin/node";
+    piProc.cmdline = "node /usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
+    const AgentMatch m5 = RequestContextHelper::detectAgent(piProc);
+    QVERIFY(m5.isValid());
+    QCOMPARE(m5.kind, QString("pi"));
+
+    ProcInfo barePi;
+    barePi.name    = "pi";
+    barePi.exe     = "/usr/bin/pi";
+    barePi.cmdline = "pi 1000000";
+    QVERIFY(!RequestContextHelper::detectAgent(barePi).isValid());
 }
 
 void RequestContextTest::testAgentWinsOverAncestry() {

@@ -47,6 +47,10 @@ _AGENT_ALIASES = {
     "opencode": "opencode",
     "copilot": "copilot-cli", "copilot-cli": "copilot-cli", "gh-copilot": "copilot-cli",
     "devin": "devin", "devin-cli": "devin",
+    # pi runs as `node …/pi-coding-agent/…/cli.js`; the package dir is the
+    # signature. Bare `pi` is deliberately absent — it collides with the
+    # unrelated Debian `pi` utility of the same name.
+    "pi-coding-agent": "pi",
 }
 _SCRIPT_EXTS = (".js", ".mjs", ".cjs", ".py", ".exe", ".cmd")
 _META = re.compile(r"[|&;<>`$()\n]")

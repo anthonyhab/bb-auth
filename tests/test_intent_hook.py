@@ -118,6 +118,53 @@ class HookCase(unittest.TestCase):
         self.assertEqual(self.declared()[0]["agent"], "devin")
         self.assertEqual(self.declared()[0]["reason"], "(no rationale captured)")
 
+    def test_codex_bash_rewrite(self):
+        # Codex reuses the Claude payload shape but adds `turn_id` — the hook
+        # must attribute `codex`, not `claude-code`, and emit the codex-valid
+        # envelope (permissionDecision "allow" + updatedInput).
+        proc = self.invoke({
+            "tool_name": "Bash",
+            "tool_input": {"command": "sudo pacman -Sc"},
+            "turn_id": "turn_123",
+            "tool_use_id": "call_abc",
+            "session_id": "sess_1",
+            "cwd": "/tmp",
+            "matcher_aliases": ["Bash"],
+        })
+        self.assertEqual(proc.returncode, 0)
+        out = json.loads(proc.stdout)
+        hook = out["hookSpecificOutput"]
+        self.assertEqual(hook["permissionDecision"], "allow")
+        self.assertEqual(hook["updatedInput"]["command"], "pkexec pacman -Sc")
+        self.assertEqual(self.declared()[0]["agent"], "codex")
+
+    def test_codex_exec_command_via_matcher_alias(self):
+        # Unified exec may report tool_name "exec_command" and surface "Bash"
+        # only via matcher_aliases — still codex, still rewritable.
+        proc = self.invoke({
+            "tool_name": "exec_command",
+            "tool_input": {"command": "sudo dmesg --clear"},
+            "turn_id": "turn_9",
+            "matcher_aliases": ["Bash"],
+        })
+        self.assertEqual(proc.returncode, 0)
+        out = json.loads(proc.stdout)
+        self.assertEqual(
+            out["hookSpecificOutput"]["updatedInput"]["command"],
+            "pkexec dmesg --clear")
+        self.assertEqual(self.declared()[0]["agent"], "codex")
+
+    def test_claude_bash_without_turn_id_stays_claude(self):
+        # A Claude-shaped payload (no codex discriminators) must not be
+        # misattributed to codex.
+        proc = self.invoke({
+            "tool_name": "Bash",
+            "tool_input": {"command": "sudo true"},
+            "session_id": "s",
+        })
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(self.declared()[0]["agent"], "claude-code")
+
     def test_gemini_tool_input_rewrite(self):
         proc = self.invoke({
             "tool_name": "run_shell_command",

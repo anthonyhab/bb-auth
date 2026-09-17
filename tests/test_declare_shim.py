@@ -234,6 +234,11 @@ class ShimCase(unittest.TestCase):
         self.assertEqual(m._agent_from_token("/usr/lib/node_modules/@google/gemini-cli/x.js"), "gemini-cli")
         self.assertEqual(m._agent_from_token("agy"), "gemini-cli")
         self.assertEqual(m._agent_from_token("codex.js"), "codex")
+        # pi matches on its npm package dir, never the bare `pi` binary name.
+        self.assertEqual(m._agent_from_token(
+            "/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"), "pi")
+        self.assertIsNone(m._agent_from_token("pi"))
+        self.assertIsNone(m._agent_from_token("/usr/bin/pi"))
         # Lookalikes must not match.
         self.assertIsNone(m._agent_from_token("node"))
         self.assertIsNone(m._agent_from_token("devin-notes.md"))

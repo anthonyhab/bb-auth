@@ -13,19 +13,20 @@ An AI agent's `sudo`/`pkexec` escalation used to look identical to the user's ow
 - The binding key is the resolved agent identity ({pid, start-time} — a recycled pid fails closed), **not** the self-asserted `agent` field; when they disagree the daemon sets `mismatch = true` and the provider surfaces it.
 - Correlation is per-agent-root, not per-command: a stale declaration can attach to a sibling's unrelated escalation — bounded by the 20 s TTL, consume-once, and the band never rendering the declared command.
 - Implemented by `IntentStore` (`src/core/agent/IntentStore.hpp`); the requestor tag (`{name, isAgent, agentKind}`) is resolved by walking process ancestry — no agent cooperation needed.
-- Agent recognition is **token-aware**: an argv token's path segment or basename must equal a known alias (script-entry forms like `codex.js`/`claude.exe` included) — raw substring matching was rejected because `vim devin-notes.md` or `agyx` must not impersonate an agent. Residual: `exec -a` self-labelling is display-only (a process can only mislabel *its own* prompts).
+- Agent recognition is **token-aware**: an argv token's path segment or basename must equal a known alias (script-entry forms like `codex.js`/`claude.exe` included) — raw substring matching was rejected because `vim devin-notes.md` or `agyx` must not impersonate an agent. pi is recognized only by its `pi-coding-agent` npm dir segment — bare `pi` collides with an unrelated Debian utility. Residual: `exec -a` self-labelling is display-only (a process can only mislabel *its own* prompts).
 
 ## Harness hook channel
 
-`bb-auth-intent-hook` is a compiled `Qt6::Core` console binary spawned by a harness hook, covering Claude Code (`PreToolUse`), Devin, and Gemini CLI (`BeforeTool`) — a zero-cooperation declaration channel.
+`bb-auth-intent-hook` is a compiled `Qt6::Core` console binary spawned by a harness hook — a zero-cooperation declaration channel covering Claude Code, Devin, Gemini CLI, and Codex CLI.
 
-- Harness is auto-detected from the payload's `tool_name` (`Bash`/`exec`/`run_shell_command`); the rewrite envelope differs per harness (`updatedInput` merge vs Gemini's `hookSpecificOutput.tool_input`). Unknown tools still declare but never rewrite.
+- Coverage: Claude/Devin/Codex via `PreToolUse` (`Bash`/`exec`/`exec_command`), Gemini via `BeforeTool` (`run_shell_command`). opencode and pi get a native plugin/extension instead (same declare + rewrite contract); hookless harnesses keep the PATH shim.
+- Harness is auto-detected from the payload: codex reuses Claude's `tool_name` shape but adds a `turn_id` discriminator (unified exec may surface as `exec_command`/`matcher_aliases: ["Bash"]`); others key on `tool_name` (`Bash`/`exec`/`run_shell_command`). The rewrite envelope differs per harness (`updatedInput` merge — codex requires `permissionDecision: "allow"` beside it — vs Gemini's `hookSpecificOutput.tool_input`). Unknown tools still declare but never rewrite.
 - The rewrite is **gated on a daemon `ok` reply** — an unreachable daemon leaves the command on its original auth path, since `pkexec` with no supervising agent can hard-fail where `sudo` would have worked.
 - Declaration triggers only on a privileged *leading* token — `cat sudo.conf` must not clobber a real pending reason under latest-wins correlation.
 - Claude Code's matcher is **`if`-gated** (`if: "Bash(sudo *)"`/`pkexec`/`doas` permission-rule syntax) so the process spawns only on actual escalations; Devin/Gemini matchers are tool-name regexes, so the hook self-filters privileged prefixes in ~1 ms. This is the load-bearing performance decision.
-- A real rationale reaches the prompt only when the harness exposes `transcript_path` (Claude; Devin is Claude-format compatible); other harnesses declare `(no rationale captured)`.
+- A real rationale reaches the prompt only when the harness exposes `transcript_path` (Claude; Devin is Claude-format compatible; codex sends it too) or live session state (pi's `ctx.sessionManager`); other harnesses declare `(no rationale captured)`.
 - An MCP variant was built and **deleted**: same declaration for a Claude-Code-only setup with more moving parts. The shim now covers hookless agents environmentally.
-- Source: `integrations/hooks/bb-auth-intent-hook.cpp`.
+- Source: `integrations/hooks/bb-auth-intent-hook.cpp`, `integrations/opencode/bb-auth-plugin.js`, `integrations/pi/bb-auth-extension.ts`.
 
 ## Agent CLI channel
 

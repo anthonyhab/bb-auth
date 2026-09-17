@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Harness hook coverage for Codex CLI and pi.** `bb-auth-intent-hook` detects
+  Codex `PreToolUse` payloads via the `turn_id` discriminator (`Bash`,
+  `exec_command`, or `matcher_aliases: ["Bash"]`) and emits the codex-required
+  `permissionDecision: "allow"` + `updatedInput` envelope. New
+  `integrations/pi/bb-auth-extension.ts` hooks pi's `tool_call` event, mutating
+  `event.input.command` in place. Both declare + rewrite only on a daemon `ok`
+  reply and fail open otherwise. Agent detection gains the `pi-coding-agent`
+  signature (bare `pi` intentionally excluded — name collision).
+
 ### Security
 
 Provider authorization hardening against a hostile same-UID process (the threat model for

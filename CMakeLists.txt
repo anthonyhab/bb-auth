@@ -159,6 +159,8 @@ install(TARGETS bb-auth-intent-hook
 # users to wire into their harness configs.
 install(FILES integrations/opencode/bb-auth-plugin.js
         DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth/integrations/opencode)
+install(FILES integrations/pi/bb-auth-extension.ts
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth/integrations/pi)
 install(FILES integrations/hooks/README.md
         DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth/integrations)
 
@@ -307,6 +309,8 @@ if(Python3_Interpreter_FOUND)
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_intent_hook.py)
     set_tests_properties(bb-auth-intent-hook PROPERTIES
         ENVIRONMENT "BB_AUTH_INTENT_HOOK=${CMAKE_BINARY_DIR}/bb-auth-intent-hook")
+    add_test(NAME bb-auth-pi-extension
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_pi_extension.py)
 endif()
 
 install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-bootstrap

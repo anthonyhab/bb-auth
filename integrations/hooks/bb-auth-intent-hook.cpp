@@ -2,8 +2,9 @@
 // auto-detecting the harness from the stdin payload.
 //
 // Wired per harness (see README.md): Claude Code settings.json, Devin CLI
-// hooks.v1.json / .claude/settings.json, Gemini CLI settings.json. It does two
-// display/audit-only things, both fail-open:
+// hooks.v1.json / .claude/settings.json, Gemini CLI settings.json, Codex CLI
+// hooks.json / config.toml. It does two display/audit-only things, both
+// fail-open:
 //
 //   1. Declares WHO + WHY to the bb-auth daemon (`intent.declare`) so the auth
 //      prompt can attribute the request and show the reason.
@@ -42,6 +43,7 @@ namespace {
 
     enum class Harness {
         ClaudeCode,
+        Codex,
         Devin,
         GeminiCli,
         Unknown
@@ -62,7 +64,20 @@ namespace {
         return QStringLiteral("/run/user/%1/bb-auth.sock").arg(::getuid());
     }
 
-    Harness detectHarness(const QString &toolName) {
+    // Codex reuses the Claude-shaped payload but adds its own fields; `turn_id`
+    // is documented as codex-specific and Claude Code never sends it. Its shell
+    // calls report `tool_name` "Bash" (unified exec may report "exec_command"
+    // with "Bash" in `matcher_aliases`), so the discriminator must come from
+    // the extra fields, not the tool name.
+    Harness detectHarness(const QJsonObject &event) {
+        const QString toolName = event.value(QStringLiteral("tool_name")).toString();
+        if (!event.value(QStringLiteral("turn_id")).toString().isEmpty()) {
+            bool bash = toolName == QStringLiteral("Bash") ||
+                        toolName == QStringLiteral("exec_command");
+            for (const QJsonValue &alias : event.value(QStringLiteral("matcher_aliases")).toArray())
+                bash = bash || alias.toString() == QStringLiteral("Bash");
+            return bash ? Harness::Codex : Harness::Unknown;
+        }
         if (toolName == QStringLiteral("Bash"))
             return Harness::ClaudeCode;
         if (toolName == QStringLiteral("exec"))
@@ -76,6 +91,8 @@ namespace {
         switch (h) {
             case Harness::ClaudeCode:
                 return QStringLiteral("claude-code");
+            case Harness::Codex:
+                return QStringLiteral("codex");
             case Harness::Devin:
                 return QStringLiteral("devin");
             case Harness::GeminiCli:
@@ -199,8 +216,9 @@ namespace {
         return re.match(command).hasMatch();
     }
 
-    // Input-merge output differs per harness: Claude Code and Devin merge
-    // `updatedInput`; Gemini CLI merges `hookSpecificOutput.tool_input`.
+    // Input-merge output differs per harness: Claude Code, Devin, and Codex
+    // merge `updatedInput` (codex requires `permissionDecision: "allow"`
+    // alongside it); Gemini CLI merges `hookSpecificOutput.tool_input`.
     void emitRewrite(Harness harness, const QString &rewritten) {
         QJsonObject out;
         if (harness == Harness::GeminiCli) {
@@ -235,8 +253,7 @@ int main() {
         return 0; // malformed input: do nothing, allow
 
     const QJsonObject event = doc.object();
-    const QString toolName = event.value(QStringLiteral("tool_name")).toString();
-    const Harness harness = detectHarness(toolName);
+    const Harness harness = detectHarness(event);
 
     const QString command = event.value(QStringLiteral("tool_input"))
                                 .toObject()
