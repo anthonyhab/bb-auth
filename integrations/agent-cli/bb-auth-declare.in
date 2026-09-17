@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""bb-auth-declare — declare agent intent to bb-auth before a privileged command.
+
+Usage:
+  bb-auth-declare --reason TEXT [--agent NAME] [-- COMMAND...]
+  bb-auth-declare --print-shim-dir
+
+If COMMAND is given it is exec'd after declaring; a simple leading `sudo CMD`
+is conservatively rewritten to `pkexec CMD` so the escalation routes through
+bb-auth's supervised polkit prompt. Fails open: any error leaves COMMAND
+unchanged and lets it run.
+
+Shim mode: when invoked as `sudo`, `doas`, or `pkexec` (argv[0] basename —
+installed as symlinks under <libexec>/bb-auth-shims/), the script activates only
+under a recognized agent ancestor: it declares a generic intent
+(channel="shim") and rewrites a clean `sudo CMD`/`doas CMD` to `pkexec CMD`.
+With no agent ancestor it transparently execs the real binary. Passthrough
+never declares, so it cannot clobber a real reason declared via the CLI or a
+harness hook (the daemon correlates latest-wins per agent).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import select
+import socket
+import sys
+import time
+
+_TTL_MS = 20000
+_MAX_REASON = 2000
+_SHIM_TOOLS = ("sudo", "doas", "pkexec")
+_SHIM_REASON = "Agent ran a privileged command without declaring a reason"
+
+# Substituted by configure_file at build time; "@…@" survives a source-tree run.
+_SHIM_DIR = "@BB_AUTH_SHIM_DIR@"
+
+
+def _sock_path() -> str:
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return os.path.join(runtime, "bb-auth.sock")
+
+
+def _detect_agent() -> str | None:
+    """Walk up the PPID tree; return the agent kind, or None when not under one."""
+    try:
+        pid = os.getppid()
+        for _ in range(16):
+            if pid <= 1:
+                break
+            try:
+                with open(f"/proc/{pid}/status", "r") as f:
+                    lines = f.readlines()
+                name = ""
+                ppid = 0
+                uid = -1
+                for line in lines:
+                    if line.startswith("Name:"):
+                        name = line.split(":", 1)[1].strip()
+                    elif line.startswith("PPid:"):
+                        ppid = int(line.split(":", 1)[1].strip())
+                    elif line.startswith("Uid:"):
+                        uid = int(line.split(":", 1)[1].strip().split()[0])
+
+                if uid != os.getuid():
+                    break
+
+                try:
+                    with open(f"/proc/{pid}/cmdline", "r") as f:
+                        cmdline = f.read().replace("\x00", " ")
+                except Exception:
+                    cmdline = ""
+
+                try:
+                    exe = os.readlink(f"/proc/{pid}/exe")
+                except Exception:
+                    exe = ""
+
+                exe_name = os.path.basename(exe).lower() if exe else ""
+                if name.lower() == "agy" or exe_name == "agy" or cmdline.strip().startswith("agy"):
+                    return "gemini-cli"
+
+                signatures = [
+                    ("claude-code", "claude"),
+                    ("codex", "codex"),
+                    ("gemini-cli", "gemini"),
+                    ("aider", "aider"),
+                    ("cursor-agent", "cursor-agent"),
+                    ("opencode", "opencode"),
+                    ("copilot-cli", "copilot"),
+                    ("devin", "devin"),
+                ]
+                haystack = (cmdline + " " + exe).lower()
+                for kind, needle in signatures:
+                    if needle in haystack:
+                        return kind
+
+                if ppid <= 1 or ppid == pid:
+                    break
+                pid = ppid
+            except Exception:
+                break
+    except Exception:
+        pass
+    return None
+
+
+def _declare(reason: str, agent: str, command: str, cwd: str, channel: str = "cli") -> dict:
+    payload = {
+        "type": "intent.declare",
+        "reason": reason[:_MAX_REASON],
+        "agent": agent,
+        "command": command,
+        "cwd": cwd,
+        "channel": channel,
+        "ttlMs": _TTL_MS,
+    }
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            s.connect(_sock_path())
+            s.sendall((json.dumps(payload) + "\n").encode())
+            s.setblocking(False)
+            reply_bytes = bytearray()
+            deadline = time.monotonic() + 0.5
+            while b"\n" not in reply_bytes and len(reply_bytes) <= 4096:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return {"bound": None, "error": "daemon timeout"}
+                readable, _, _ = select.select([s], [], [], remaining)
+                if not readable:
+                    return {"bound": None, "error": "daemon timeout"}
+                try:
+                    chunk = s.recv(256)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    break
+                reply_bytes.extend(chunk)
+            if b"\n" not in reply_bytes or len(reply_bytes) > 4096:
+                return {"bound": None, "error": "invalid daemon reply"}
+            reply = json.loads(bytes(reply_bytes).split(b"\n", 1)[0].decode())
+            if not isinstance(reply, dict) or reply.get("type") != "ok" or type(reply.get("bound")) is not bool:
+                return {"bound": None, "error": "invalid daemon reply"}
+            return {"bound": reply["bound"], "error": ""}
+    except Exception:
+        return {"bound": None, "error": "daemon unavailable"}
+
+
+def _report(status: dict) -> None:
+    try:
+        if status["bound"] is True:
+            print("bb-auth: intent declared", file=sys.stderr)
+        elif status["bound"] is False:
+            print("bb-auth: intent not bound to a recognized agent; prompt will use human layout", file=sys.stderr)
+        else:
+            print("bb-auth: intent declaration unavailable; command continues without attribution", file=sys.stderr)
+    except (OSError, ValueError):
+        pass
+
+
+def _rewrite_sudo(argv: list) -> list:
+    """Rewrite a plain `sudo CMD` → `pkexec CMD`. Conservative: no options, no env=val."""
+    if not argv or argv[0] != "sudo" or len(argv) < 2:
+        return argv
+    rest = argv[1:]
+    if rest[0].startswith("-") or "=" in rest[0]:
+        return argv
+    return ["pkexec"] + rest
+
+
+def _shim_rewrite(tool: str, argv: list):
+    """sudo/doas → pkexec for a clean leading `tool CMD`; otherwise None."""
+    if tool not in ("sudo", "doas") or not argv:
+        return None
+    if argv[0].startswith("-") or "=" in argv[0]:
+        return None
+    return ["pkexec"] + argv
+
+
+def _real_binary(name: str):
+    """First PATH entry resolving to a different file than this script."""
+    own = os.path.realpath(__file__)
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        cand = os.path.join(d or ".", name)
+        try:
+            if os.path.isfile(cand) and os.access(cand, os.X_OK) and not os.path.samefile(cand, own):
+                return cand
+        except OSError:
+            continue
+    return None
+
+
+def _exec_real(name: str, argv: list):
+    """Exec the real binary past the shim; on resolution failure retry with the
+    shim dir stripped from PATH so we cannot re-enter ourselves."""
+    real = _real_binary(name)
+    if real:
+        os.execv(real, [name] + argv)
+    shimdir = os.path.dirname(os.path.abspath(__file__))
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join(
+        d for d in env.get("PATH", "").split(os.pathsep)
+        if os.path.abspath(d or ".") != shimdir
+    )
+    try:
+        os.execvpe(name, [name] + argv, env)
+    except OSError:
+        os._exit(127)
+
+
+# @lat: [[agent-intent#PATH shim channel]]
+def _shim_mode(tool: str, argv: list) -> None:
+    try:
+        agent = _detect_agent()
+    except Exception:
+        agent = None
+    rewritten = _shim_rewrite(tool, argv) if agent else None
+    if not rewritten:
+        _exec_real(tool, argv)
+        return
+    try:
+        cwd = os.getcwd()
+    except OSError:
+        cwd = ""
+    status = _declare(_SHIM_REASON, agent, " ".join([tool] + argv), cwd, channel="shim")
+    if status["bound"] is not None:
+        # Daemon answered (bound or not): the supervised path is live — rewrite.
+        _exec_real(rewritten[0], rewritten[1:])
+    else:
+        # No daemon to supervise: keep the command on its original auth path.
+        _exec_real(tool, argv)
+
+
+def _shim_dir() -> str:
+    if os.environ.get("BB_AUTH_SHIM_DIR"):
+        return os.environ["BB_AUTH_SHIM_DIR"]
+    if _SHIM_DIR.startswith("@"):
+        # Source-tree run: derive <prefix>/libexec/bb-auth-shims from bindir.
+        return os.path.normpath(
+            os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir, "libexec", "bb-auth-shims")
+        )
+    return _SHIM_DIR
+
+
+def main() -> None:
+    invoked = os.path.basename(sys.argv[0])
+    if invoked in _SHIM_TOOLS:
+        _shim_mode(invoked, sys.argv[1:])
+        return
+
+    parser = argparse.ArgumentParser(
+        description="Declare agent intent to bb-auth before a privileged command.",
+        epilog="COMMAND is optional; if given, sudo is rewritten to pkexec and the process is replaced.",
+    )
+    parser.add_argument("--reason", help="Why the command is being run (shown at auth prompt)")
+    parser.add_argument("--agent", default=None, help="Agent identifier (display/audit only)")
+    parser.add_argument("--print-shim-dir", action="store_true",
+                        help="Print the installed PATH-shim directory and exit")
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+
+    if args.print_shim_dir:
+        print(_shim_dir())
+        return
+
+    if not args.reason:
+        parser.error("--reason is required")
+
+    cmd = args.command
+    if cmd and cmd[0] == "--":
+        cmd = cmd[1:]
+
+    agent = args.agent or _detect_agent() or "agent"
+    try:
+        cwd = os.getcwd()
+    except OSError:
+        cwd = ""
+    declaration_status = _declare(args.reason, agent, " ".join(cmd), cwd)
+    _report(declaration_status)
+    rewritten = _rewrite_sudo(cmd) if declaration_status["bound"] is True else cmd
+
+    if rewritten:
+        os.execvp(rewritten[0], rewritten)
+
+
+if __name__ == "__main__":
+    main()

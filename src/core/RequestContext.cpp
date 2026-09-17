@@ -258,6 +258,15 @@ DesktopInfo RequestContextHelper::findDesktopForExe(const QString& exePath) {
 }
 
 AgentMatch RequestContextHelper::detectAgent(const ProcInfo& proc) {
+    // Special case for agy (Gemini CLI) to avoid substring collision with words like "strategy" or "tragedy"
+    const QString exeName = QFileInfo(proc.exe).fileName().toLower();
+    if (proc.name.toLower() == QLatin1String("agy") || exeName == QLatin1String("agy") ||
+        proc.cmdline.trimmed().startsWith(QLatin1String("agy")) ||
+        proc.cmdline.contains(QLatin1String(" /agy")) ||
+        proc.cmdline.contains(QLatin1String("/bin/agy"))) {
+        return AgentMatch{QStringLiteral("gemini-cli"), QStringLiteral("Gemini CLI"), QStringLiteral("gemini-cli")};
+    }
+
     // Curated registry of known AI agent runtimes. Matched case-insensitively against
     // the cmdline (agents carry their name in argv) or the exe basename. Most agents run
     // via node/python, so the exe alone ("node") is not enough — the cmdline is. This
@@ -276,6 +285,7 @@ AgentMatch RequestContextHelper::detectAgent(const ProcInfo& proc) {
         {"cursor-agent", "Cursor Agent", "cursor-agent", "cursor-agent"},
         {"opencode", "OpenCode", "opencode", "opencode"},
         {"copilot-cli", "Copilot CLI", "copilot", "copilot"},
+        {"devin", "Devin", "devin", "devin"},
     };
 
     const QString haystack = (proc.cmdline + " " + proc.exe).toLower();

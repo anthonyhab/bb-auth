@@ -228,6 +228,7 @@ namespace bb::fallback::prompt {
         const QJsonObject intent = context.value("intent").toObject();
         model.reason             = normalizeDetailText(intent.value("reason").toString());
         model.intentMismatch     = intent.value("mismatch").toBool();
+        model.agentRequestor     = isAgentRequestor;
         if (model.summary.isEmpty() && !model.details.isEmpty()) {
             const QString normalizedDetails = normalizeDetailText(model.details);
             const qsizetype newline         = normalizedDetails.indexOf('\n');

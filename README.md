@@ -106,6 +106,38 @@ More troubleshooting:
 
 - `docs/TROUBLESHOOTING.md`
 
+## Agent Supervision (AI agents)
+
+When an AI agent (Claude Code, Gemini CLI, opencode, Devin, …) runs a privileged
+command, bb-auth shows **who** is asking and — when declared — **why**, with an
+"AI agent" badge on the prompt.
+
+Three channels, in order of reliability:
+
+- **PATH shims (zero cooperation):** `sudo`/`doas`/`pkexec` shims install inertly
+  to `<libexec>/bb-auth-shims/`. They activate only under a recognized agent
+  ancestor — a human's `sudo` passes through untouched. To enable, prepend the
+  shim dir in your shell profile so agent processes inherit it:
+
+  ```bash
+  export PATH="$(bb-auth-declare --print-shim-dir):$PATH"
+  ```
+
+  Under an agent, `sudo CMD`/`doas CMD` are routed through the supervised polkit
+  prompt even if the agent never declared anything.
+
+- **Harness hooks:** a compiled `PreToolUse`/`BeforeTool` hook
+  (`integrations/hooks/`) covers Claude Code, Devin, and Gemini CLI, and can
+  carry the agent's real rationale to the prompt where the harness exposes a
+  transcript.
+
+- **Skill / manual:** agents can wrap commands directly:
+  `bb-auth-declare --reason "why" -- sudo CMD`.
+
+Residual limits: absolute-path invocations (`/usr/bin/sudo`) bypass PATH shims;
+attribution is display/audit only and never gates the allow/deny decision.
+Requires `python3` for the declare/shim tooling (Arch: `python` optdepend).
+
 ## Provider Model (Advanced)
 
 - UI providers are runtime drop-ins via manifests in `providers.d`.

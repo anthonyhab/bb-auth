@@ -140,6 +140,31 @@ void RequestContextTest::testAgentDetectedFromCmdline() {
     plain.exe     = "/usr/bin/node";
     plain.cmdline = "node server.js";
     QVERIFY(!RequestContextHelper::detectAgent(plain).isValid());
+
+    // Test agy agent matching
+    ProcInfo agyProc;
+    agyProc.name = "agy";
+    agyProc.exe = "/home/habibe/.local/bin/agy";
+    agyProc.cmdline = "agy";
+    const AgentMatch m2 = RequestContextHelper::detectAgent(agyProc);
+    QVERIFY(m2.isValid());
+    QCOMPARE(m2.kind, QString("gemini-cli"));
+
+    // Test collision resistance (e.g. strategy should not match agy)
+    ProcInfo strategyProc;
+    strategyProc.name = "strategy";
+    strategyProc.exe = "/usr/bin/strategy";
+    strategyProc.cmdline = "strategy --run";
+    QVERIFY(!RequestContextHelper::detectAgent(strategyProc).isValid());
+
+    // Devin agent matching
+    ProcInfo devinProc;
+    devinProc.name    = "devin";
+    devinProc.exe     = "/opt/devin-desktop/devin";
+    devinProc.cmdline = "/opt/devin-desktop/devin --flag";
+    const AgentMatch m3 = RequestContextHelper::detectAgent(devinProc);
+    QVERIFY(m3.isValid());
+    QCOMPARE(m3.kind, QString("devin"));
 }
 
 void RequestContextTest::testAgentWinsOverAncestry() {

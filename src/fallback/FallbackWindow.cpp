@@ -361,6 +361,9 @@ namespace bb {
                 const QString prefix = model.intentMismatch ? QStringLiteral("⚠ Stated reason (agent identity unverified): ") : QStringLiteral("Stated reason: ");
                 m_reasonLabel->setText(prefix + model.reason);
                 m_reasonLabel->setVisible(true);
+            } else if (model.agentRequestor) {
+                m_reasonLabel->setText(QStringLiteral("No reason declared by the agent."));
+                m_reasonLabel->setVisible(true);
             } else {
                 m_reasonLabel->clear();
                 m_reasonLabel->hide();

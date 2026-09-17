@@ -145,14 +145,54 @@ configure_file(assets/bb-auth-bootstrap.sh.in bb-auth-bootstrap @ONLY)
 install(TARGETS bb-auth
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
 
-# Agent intent integration — Claude Code PreToolUse hook. Declares who+why to the
-# daemon and routes a simple leading `sudo` through pkexec so bb-auth can supervise
-# the escalation. Console helper; Qt6::Core only (JSON), raw POSIX for the socket.
+# Agent intent hook — PreToolUse/BeforeTool integration for Claude Code, Devin,
+# and Gemini CLI (auto-detected from the hook payload). Declares who+why to the
+# daemon and routes a simple leading `sudo` through pkexec so bb-auth can
+# supervise the escalation. Console helper; Qt6::Core only (JSON), raw POSIX.
 qt_add_executable(bb-auth-intent-hook
-        integrations/claude-code/bb-auth-intent-hook.cpp)
+        integrations/hooks/bb-auth-intent-hook.cpp)
 target_link_libraries(bb-auth-intent-hook PRIVATE Qt6::Core)
 install(TARGETS bb-auth-intent-hook
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
+
+# opencode plugin (drop-in JS) + integration docs — shipped under datadir for
+# users to wire into their harness configs.
+install(FILES integrations/opencode/bb-auth-plugin.js
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth/integrations/opencode)
+install(FILES integrations/hooks/README.md
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth/integrations)
+
+# Agent CLI — universal intent declaration; any agent calls this directly.
+# Also installs PATH shims (sudo/doas/pkexec → this script) under
+# <libexec>/bb-auth-shims for opt-in environmental supervision: under a
+# recognized agent ancestor the shim declares intent and rewrites a clean
+# sudo/doas to pkexec; for humans it transparently execs the real binary.
+# (nb: <libexec>/bb-auth is the daemon *binary*, so the dir cannot nest there.)
+set(BB_AUTH_SHIM_DIR "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-shims")
+# Relative link target keeps the shims correct under any install prefix
+# (e.g. libexec→bin is ../../bin from <libexec>/bb-auth-shims).
+file(RELATIVE_PATH BB_AUTH_SHIM_LINK_TARGET
+     "/${CMAKE_INSTALL_LIBEXECDIR}/bb-auth-shims"
+     "/${CMAKE_INSTALL_BINDIR}/bb-auth-declare")
+configure_file(integrations/agent-cli/bb-auth-declare.in bb-auth-declare @ONLY)
+install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-declare
+        DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+install(CODE "
+    if(\"${CMAKE_INSTALL_LIBEXECDIR}\" MATCHES \"^/\")
+        set(_bb_auth_shim_dir \"\$ENV{DESTDIR}${CMAKE_INSTALL_LIBEXECDIR}/bb-auth-shims\")
+    else()
+        set(_bb_auth_shim_dir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/bb-auth-shims\")
+    endif()
+    file(MAKE_DIRECTORY \"\${_bb_auth_shim_dir}\")
+    foreach(_bb_auth_tool sudo doas pkexec)
+        execute_process(
+            COMMAND \${CMAKE_COMMAND} -E create_symlink
+                \"${BB_AUTH_SHIM_LINK_TARGET}\"
+                \"\${_bb_auth_shim_dir}/\${_bb_auth_tool}\"
+        )
+    endforeach()
+")
 
 qt_add_executable(bb-auth-fallback
     src/fallback/main.cpp
@@ -253,6 +293,19 @@ target_link_libraries(bb-auth-tests
 add_test(NAME bb-auth-tests COMMAND bb-auth-tests)
 set_tests_properties(bb-auth-tests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# PATH-shim / declare CLI tests (python3; no extra deps)
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME bb-auth-declare-shim
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_declare_shim.py)
+    set_tests_properties(bb-auth-declare-shim PROPERTIES
+        ENVIRONMENT "BB_AUTH_DECLARE=${CMAKE_BINARY_DIR}/bb-auth-declare")
+    add_test(NAME bb-auth-intent-hook
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_intent_hook.py)
+    set_tests_properties(bb-auth-intent-hook PROPERTIES
+        ENVIRONMENT "BB_AUTH_INTENT_HOOK=${CMAKE_BINARY_DIR}/bb-auth-intent-hook")
+endif()
 
 install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-bootstrap
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})

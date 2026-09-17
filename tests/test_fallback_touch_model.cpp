@@ -19,6 +19,8 @@ namespace bb {
         void pinentryPromptRemainsPassphraseDriven();
         void pinentryPromptUpdateOverridesContextMessage();
         void agentRequestorIsLabelledAndReasonSurfaced();
+        void agentRequestorWithoutReasonIsFlagged();
+        void humanRequestorWithoutReasonIsNotFlagged();
         void intentMismatchIsFlagged();
 
       private:
@@ -165,6 +167,28 @@ namespace bb {
         QVERIFY(model.requestor.contains("AI agent"));
         QCOMPARE(model.reason, QString("remove duplicate desktop file"));
         QVERIFY(!model.intentMismatch);
+    }
+
+    void PromptModelBuilderTouchTest::agentRequestorWithoutReasonIsFlagged() {
+        const fallback::prompt::PromptModelBuilder builder;
+        QJsonObject                                context{{"message", "Authentication is required"},
+                                                           {"requestor", QJsonObject{{"name", "Claude Code"}, {"isAgent", true}, {"agentKind", "claude-code"}, {"pid", 4242}}}};
+        QJsonObject                                event{{"type", "session.created"}, {"id", "s3"}, {"source", "polkit"}, {"context", context}};
+
+        const auto model = builder.build(event);
+        QVERIFY(model.agentRequestor);
+        QVERIFY(model.reason.isEmpty());
+    }
+
+    void PromptModelBuilderTouchTest::humanRequestorWithoutReasonIsNotFlagged() {
+        const fallback::prompt::PromptModelBuilder builder;
+        const QJsonObject                          context{{"message", "Authentication is required"},
+                                                         {"requestor", QJsonObject{{"name", "test-app"}, {"pid", 101}}}};
+        const QJsonObject                          event{{"type", "session.created"}, {"id", "s4"}, {"source", "polkit"}, {"context", context}};
+
+        const auto model = builder.build(event);
+        QVERIFY(!model.agentRequestor);
+        QVERIFY(model.reason.isEmpty());
     }
 
     void PromptModelBuilderTouchTest::intentMismatchIsFlagged() {

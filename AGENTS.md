@@ -13,6 +13,7 @@ Compact guide for coding agents in this repo.
 1. `PLAN.md` (current phase + tasks)
 2. `docs/PROVIDER_CONTRACT.md` (protocol boundary)
 3. `README.md` (user-facing behavior)
+4. `lat.md/` (knowledge graph — `lat search` for relevant sections)
 
 ## Repo Map
 
@@ -64,6 +65,15 @@ For non-trivial changes:
 - Work on feature/staging branches.
 - Merge only when local gates + CI are green.
 - Prefer squash merge to keep history compact.
+
+## Docs Ownership
+
+One source of truth per fact.
+
+- `lat.md/` — living knowledge graph: architecture, domain concepts, trust model, test specs. Update sections in the same change that alters behavior; `lat check` must pass. (C++ symbol links `[[x.cpp#sym]]` are unsupported — use `// @lat:` comments for code→spec edges and plain `code` spans for spec→code.)
+- `openspec/` — change workflow: `openspec/changes/` are proposals in flight, `openspec/specs/` are current capability specs. Drive non-trivial changes via the opsx propose → apply → verify → archive flow.
+- `docs/adr/` — frozen decision history (0001–0003). Read for context; do not add new ADRs — new decisions land in openspec changes and lat.md sections.
+- `docs/PROVIDER_CONTRACT.md` — normative IPC contract; `lat.md/protocol.md` summarizes, never restates it.
 
 %% lat:begin %%
 # Before starting work

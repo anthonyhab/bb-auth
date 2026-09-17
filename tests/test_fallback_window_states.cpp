@@ -92,6 +92,8 @@ namespace bb {
         void submitTimeout_releasesBusyAndShowsRetry();
         void cancelTimeout_releasesBusyAndShowsError();
         void closedError_autoDismissesToAvoidDeadEnd();
+        void agentWithoutReason_showsUndeclaredState();
+        void humanWithoutReason_hidesReasonLabel();
     };
 
     void FallbackWindowTouchModelTest::background_isOpaqueToAvoidBlurBleed() {
@@ -322,6 +324,30 @@ namespace bb {
         QVERIFY(window.m_errorLabel->isVisible());
         QTRY_VERIFY_WITH_TIMEOUT(window.m_currentSessionId.isEmpty(), 3000);
         QVERIFY(!window.isVisible());
+    }
+
+    void FallbackWindowTouchModelTest::agentWithoutReason_showsUndeclaredState() {
+        FallbackClient client("/tmp/non-existent-bb-auth.sock");
+        FallbackWindow window(&client);
+
+        const QJsonObject context{{"message", "Authentication is required"},
+                                  {"requestor", QJsonObject{{"name", "Claude Code"}, {"isAgent", true}, {"agentKind", "claude-code"}, {"pid", 4242}}}};
+        const QJsonObject created{{"type", "session.created"}, {"id", "agent-no-reason"}, {"source", "polkit"}, {"context", context}};
+        QVERIFY(QMetaObject::invokeMethod(&client, "sessionCreated", Qt::DirectConnection, Q_ARG(QJsonObject, created)));
+
+        QVERIFY(window.m_reasonLabel->isVisibleTo(&window));
+        QCOMPARE(window.m_reasonLabel->text(), QStringLiteral("No reason declared by the agent."));
+    }
+
+    void FallbackWindowTouchModelTest::humanWithoutReason_hidesReasonLabel() {
+        FallbackClient client("/tmp/non-existent-bb-auth.sock");
+        FallbackWindow window(&client);
+
+        const QJsonObject created = makeCreatedEvent("human-no-reason");
+        QVERIFY(QMetaObject::invokeMethod(&client, "sessionCreated", Qt::DirectConnection, Q_ARG(QJsonObject, created)));
+
+        QVERIFY(!window.m_reasonLabel->isVisibleTo(&window));
+        QVERIFY(window.m_reasonLabel->text().isEmpty());
     }
 
 } // namespace bb

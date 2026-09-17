@@ -13,13 +13,15 @@ An AI agent's `sudo`/`pkexec` escalation used to look identical to the user's ow
 - The binding key is the resolved agent identity ({pid, start-time} — a recycled pid fails closed), **not** the self-asserted `agent` field; when they disagree the daemon sets `mismatch = true` and the provider surfaces it.
 - Implemented by `IntentStore` (`src/core/agent/IntentStore.hpp`); the requestor tag (`{name, isAgent, agentKind}`) is resolved by walking process ancestry — no agent cooperation needed.
 
-## PreToolUse hook channel
+## Harness hook channel
 
-`bb-auth-intent-hook` is a compiled `Qt6::Core` console binary installed to the daemon's libexec, spawned by a Claude Code `PreToolUse` hook — the zero-cooperation declaration channel.
+`bb-auth-intent-hook` is a compiled `Qt6::Core` console binary spawned by a harness hook, covering Claude Code (`PreToolUse`), Devin, and Gemini CLI (`BeforeTool`) — a zero-cooperation declaration channel.
 
-- The matcher is **`if`-gated** (`if: "Bash(sudo *)"`/`pkexec`/`doas` permission-rule syntax) so the process spawns only on actual escalations: zero overhead on ordinary Bash, ~1 ms native startup on the rare privileged path. This is the load-bearing performance decision.
-- An MCP variant was built and **deleted**: same declaration for a Claude-Code-only setup with more moving parts. Recover from git history if a non-Claude agent ever needs explicit declarations.
-- Source: `integrations/claude-code/bb-auth-intent-hook.cpp`.
+- Harness is auto-detected from the payload's `tool_name` (`Bash`/`exec`/`run_shell_command`); the rewrite envelope differs per harness (`updatedInput` merge vs Gemini's `hookSpecificOutput.tool_input`). Unknown tools still declare but never rewrite.
+- Claude Code's matcher is **`if`-gated** (`if: "Bash(sudo *)"`/`pkexec`/`doas` permission-rule syntax) so the process spawns only on actual escalations; Devin/Gemini matchers are tool-name regexes, so the hook self-filters privileged prefixes in ~1 ms. This is the load-bearing performance decision.
+- A real rationale reaches the prompt only when the harness exposes `transcript_path` (Claude; Devin is Claude-format compatible); other harnesses declare `(no rationale captured)`.
+- An MCP variant was built and **deleted**: same declaration for a Claude-Code-only setup with more moving parts. The shim now covers hookless agents environmentally.
+- Source: `integrations/hooks/bb-auth-intent-hook.cpp`.
 
 ## Agent CLI channel
 
@@ -27,6 +29,15 @@ An AI agent's `sudo`/`pkexec` escalation used to look identical to the user's ow
 
 - Agent identity is auto-detected by walking PPID ancestry (`_detect_agent`), same signature family as the daemon's resolver.
 - Fails open like the hook: declaration failure or an unbound (non-agent) declarer leaves the command unchanged — and the `sudo`→`pkexec` rewrite only happens when the declaration actually bound.
+
+## PATH shim channel
+
+`bb-auth-declare` doubles as `sudo`/`doas`/`pkexec` via argv0 dispatch, installed as symlinks under `<libexec>/bb-auth-shims/` — the environmental channel that needs no agent cooperation at all, just a PATH prepend.
+
+- Activation gates on the same ancestry detection: under a recognized agent it declares a fixed generic reason (`channel="shim"`, argv only in the audit-only `command` field) and rewrites clean `sudo CMD`/`doas CMD` to `pkexec CMD`; under humans it execs the real binary verbatim (PATH scan skipping self).
+- Passthrough never declares — latest-wins correlation means a passthrough declare would clobber a real reason set moments earlier by the CLI/hook.
+- Daemon unreachable → passthrough rather than rewrite: a dead daemon would leave pkexec with no agent to authorize against, so keeping `sudo` on its own path beats forced supervision.
+- Residual limits: absolute-path calls and non-PATH exec bypass it; it is supervision UX, not a security boundary.
 
 ## sudo to pkexec rewrite
 
@@ -39,6 +50,7 @@ The hook rewrites a *clean leading* `sudo CMD` into `pkexec CMD` via the PreTool
 
 The production prompt renders, for agent requests only: agent glyph + resolved requestor name + "AI agent" badge, the declared reason, and a mismatch warning — a human request renders unchanged.
 
+- An agent request with **no declared reason** renders an explicit `No reason declared by the agent.` line — a missing reason reads as a signal, not an absence (`PromptDisplayModel::agentRequestor` drives the state).
 - The band **never** shows the declared `command`: correlation is by ancestry, not command match, so the string can diverge from what polkit actually authorizes — rendering it would manufacture false confidence.
 - What is authorized stays with polkit's own message; the band lives in the prompt layer ([[architecture#Fallback UI]] `prompt/` extractors).
 

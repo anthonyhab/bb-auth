@@ -66,7 +66,21 @@ ls -l ~/.config/bb-auth/providers.d
 ls -l ~/.local/share/bb-auth/providers.d
 ```
 
-## 5) Local dev gating
+## 5) Agent escalations don't show attribution
+
+If agent-initiated `sudo` reaches PAM directly, bb-auth never sees it — check
+whether the shim dir is on the agent's PATH:
+
+```bash
+bb-auth-declare --print-shim-dir        # e.g. /usr/libexec/bb-auth-shims
+echo "$PATH" | tr ':' '\n' | grep shims # inside the agent's shell
+```
+
+The shims only intercept PATH-resolved `sudo`/`doas`/`pkexec` under a recognized
+agent ancestor; `/usr/bin/sudo` and option-bearing commands pass through by
+design. See README → Agent Supervision.
+
+## 6) Local dev gating
 
 Before merge/release:
 

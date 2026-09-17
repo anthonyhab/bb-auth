@@ -54,3 +54,4 @@ compile_commands.json
 .gemini
 
 lat.md/.cache/
+__pycache__/

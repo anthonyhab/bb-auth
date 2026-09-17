@@ -25,6 +25,9 @@ namespace bb::fallback::prompt {
         // disagrees with the OS-resolved identity.
         QString      reason;
         bool         intentMismatch     = false;
+        // OS-resolved agent provenance — drives the explicit undeclared-reason
+        // state so a missing reason reads as a signal, not an absence.
+        bool         agentRequestor     = false;
         bool         passphrasePrompt   = false;
         bool         allowEmptyResponse = false;
     };
