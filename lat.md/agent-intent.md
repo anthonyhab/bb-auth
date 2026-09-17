@@ -11,13 +11,17 @@ An AI agent's `sudo`/`pkexec` escalation used to look identical to the user's ow
 `intent.declare {reason, agent, command, channel}` binds to the declarer's OS-resolved ancestry, then attaches to the next polkit request as `Context.intent`.
 
 - The binding key is the resolved agent identity ({pid, start-time} — a recycled pid fails closed), **not** the self-asserted `agent` field; when they disagree the daemon sets `mismatch = true` and the provider surfaces it.
+- Correlation is per-agent-root, not per-command: a stale declaration can attach to a sibling's unrelated escalation — bounded by the 20 s TTL, consume-once, and the band never rendering the declared command.
 - Implemented by `IntentStore` (`src/core/agent/IntentStore.hpp`); the requestor tag (`{name, isAgent, agentKind}`) is resolved by walking process ancestry — no agent cooperation needed.
+- Agent recognition is **token-aware**: an argv token's path segment or basename must equal a known alias (script-entry forms like `codex.js`/`claude.exe` included) — raw substring matching was rejected because `vim devin-notes.md` or `agyx` must not impersonate an agent. Residual: `exec -a` self-labelling is display-only (a process can only mislabel *its own* prompts).
 
 ## Harness hook channel
 
 `bb-auth-intent-hook` is a compiled `Qt6::Core` console binary spawned by a harness hook, covering Claude Code (`PreToolUse`), Devin, and Gemini CLI (`BeforeTool`) — a zero-cooperation declaration channel.
 
 - Harness is auto-detected from the payload's `tool_name` (`Bash`/`exec`/`run_shell_command`); the rewrite envelope differs per harness (`updatedInput` merge vs Gemini's `hookSpecificOutput.tool_input`). Unknown tools still declare but never rewrite.
+- The rewrite is **gated on a daemon `ok` reply** — an unreachable daemon leaves the command on its original auth path, since `pkexec` with no supervising agent can hard-fail where `sudo` would have worked.
+- Declaration triggers only on a privileged *leading* token — `cat sudo.conf` must not clobber a real pending reason under latest-wins correlation.
 - Claude Code's matcher is **`if`-gated** (`if: "Bash(sudo *)"`/`pkexec`/`doas` permission-rule syntax) so the process spawns only on actual escalations; Devin/Gemini matchers are tool-name regexes, so the hook self-filters privileged prefixes in ~1 ms. This is the load-bearing performance decision.
 - A real rationale reaches the prompt only when the harness exposes `transcript_path` (Claude; Devin is Claude-format compatible); other harnesses declare `(no rationale captured)`.
 - An MCP variant was built and **deleted**: same declaration for a Claude-Code-only setup with more moving parts. The shim now covers hookless agents environmentally.
@@ -41,7 +45,7 @@ An AI agent's `sudo`/`pkexec` escalation used to look identical to the user's ow
 
 ## sudo to pkexec rewrite
 
-The hook rewrites a *clean leading* `sudo CMD` into `pkexec CMD` via the PreToolUse `updatedInput` channel, routing the escalation through bb-auth's supervised, attributed polkit prompt.
+The hook rewrites a *clean leading* `sudo CMD`/`doas CMD` into `pkexec CMD` via the harness's input-merge channel, routing the escalation through bb-auth's supervised, attributed polkit prompt.
 
 - Deliberately narrow: declines sudo options (`-i`, `-u`, …), env assignments, and shell metacharacters (`|`, `&&`, `;`, redirects, subshells, substitution) — pkexec's flags and minimal env differ from sudo's and mis-rewriting could change behaviour.
 - Declined commands run unchanged, still with intent declared; the rewrite is surfaced via `permissionDecisionReason`, never silent.

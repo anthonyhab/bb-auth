@@ -83,7 +83,7 @@ Exit criteria:
 - A non-C++ provider can pass conformance tests and run in production flow.
 - Provider API changes require explicit versioning and migration notes.
 
-## Phase 3: Best-in-Class Qt UX
+## Phase 3: Best-in-Class Qt UX (completed)
 
 Goal: polished, trustable prompts with clear context and low friction.
 
@@ -93,24 +93,24 @@ Tasks:
 - [x] Improve requestor identity and action clarity.
 - [x] Tighten error, cancel, retry, and timeout UX states.
 - [x] Add accessibility checks (keyboard-only flow, scaling, contrast).
-- [ ] Add UX snapshot tests and flow regression tests.
+- [x] Add UX snapshot tests and flow regression tests.
 
 Exit criteria:
 
 - Prompt behavior is consistent across all auth sources.
 - No ambiguous prompts or dead-end states in tested scenarios.
 
-## Phase 4: Reliability and Security
+## Phase 4: Reliability and Security (completed)
 
 Goal: production-grade behavior under failure and hostile inputs.
 
 Tasks:
 
-- [ ] Add integration tests for provider crash/restart/failover.
-- [ ] Add stress tests for session queueing and rapid prompt churn.
-- [ ] Fuzz manifest parsing and malformed IPC frames.
-- [ ] Audit authorization boundaries for inactive providers.
-- [ ] Add startup/shutdown race and conflict-agent test coverage.
+- [x] Add integration tests for provider crash/restart/failover.
+- [x] Add stress tests for session queueing and rapid prompt churn.
+- [x] Fuzz manifest parsing and malformed IPC frames.
+- [x] Audit authorization boundaries for inactive providers.
+- [x] Add startup/shutdown race and conflict-agent test coverage.
 
 Exit criteria:
 
@@ -124,9 +124,9 @@ Goal: repeatable releases with low regression risk.
 Tasks:
 
 - [x] Define release gates (`build`, `ctest`, packaging smoke, service smoke).
-- [ ] Add migration notes and upgrade checks for each release.
-- [ ] Publish compatibility matrix (core version vs provider protocol).
-- [ ] Automate package validation in CI for core-only and optional-provider scenarios.
+- [x] Add migration notes and upgrade checks for each release.
+- [x] Publish compatibility matrix (core version vs provider protocol).
+- [x] Automate package validation in CI for core-only and optional-provider scenarios.
 
 Exit criteria:
 
@@ -194,3 +194,8 @@ Do not:
 - 2026-02-18: Added keyboard-first fallback UX checks (Enter submit, keyboard cancel activation, tab-order traversal where supported) and explicit pending-action focus recovery.
 - 2026-02-18: Completed fallback accessibility checks by hardening keyboard-only cancel recovery during submit-pending, switching UI text styling to theme-aware palette defaults for contrast resilience, and adding scaling/contrast regression tests.
 - 2026-02-18: Added `scripts/gate-local.sh` and `docs/LOCAL_RELEASE_WORKFLOW.md` to enforce local pre-main build/test/install/daemon gates before release-facing merges.
+- 2026-02-18: Added deterministic fuzz coverage (`tests/test_fuzz_inputs.cpp`) for provider manifest parsing and daemon IPC frames: seeded mutations plus adversarial structures (deep nesting, lone surrogates, oversized fields, garbage frames) must return structured errors and never wedge the server.
+- 2026-02-18: Fixed a socket-hijack race in `IpcServer::start` — a second daemon could unlink a live socket path and orphan the running agent. Start now probes the path and fails closed on a live peer. Covered by conflict/stale-file/restart tests in `test_ipc_contract.cpp`.
+- 2026-02-18: Added provider crash-failover and restart/reattest coverage (`test_provider_conformance.cpp`) plus session queueing/churn stress (`test_session_store.cpp`). Authorization-boundary audit: fail-closed `isAuthorized` is covered by `enforcesActiveProviderAuthorizationBoundary` and `untrustedProviderNeverBecomesActiveOrAuthorized`.
+- 2026-02-18: Added golden-snapshot prompt regression tests (`test_prompt_snapshots.cpp`) covering the complete display model per canonical scenario (polkit run/generic, agent declared/undeclared, keyring, pinentry OpenPGP, fingerprint).
+- 2026-02-18: Added `docs/COMPATIBILITY.md` — core↔IPC matrix, migration notes per protocol bump, and a release checklist.

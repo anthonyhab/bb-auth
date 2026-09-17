@@ -37,8 +37,14 @@ def _load_module():
 
 def setUpModule():
     # configure_file does not preserve the exec bit in the build tree; the
-    # installed copy gets it via install(PROGRAMS). Mirror that here.
-    os.chmod(SCRIPT, 0o755)
+    # installed copy gets it via install(PROGRAMS). Stage an executable copy
+    # instead of mutating the source file's mode.
+    global SCRIPT
+    if not os.access(SCRIPT, os.X_OK):
+        staged = os.path.join(tempfile.mkdtemp(prefix="bb-auth-declare-"), "bb-auth-declare")
+        shutil.copyfile(SCRIPT, staged)
+        os.chmod(staged, 0o755)
+        SCRIPT = staged
 
 
 class FakeDaemon(threading.Thread):
@@ -134,27 +140,29 @@ class ShimCase(unittest.TestCase):
         with open(self.logfile) as f:
             return f.read()
 
-    def detects_agent(self):
-        """Whether THIS test environment sits under a recognized agent."""
-        out = subprocess.run(
-            [sys.executable, "-c",
-             "import importlib.util,os;"
-             "from importlib.machinery import SourceFileLoader;"
-             "s=importlib.util.spec_from_file_location('m',os.environ['BB_AUTH_DECLARE'],"
-             "  loader=SourceFileLoader('m',os.environ['BB_AUTH_DECLARE']));"
-             "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
-             "print(m._detect_agent() or '')"],
-            env={**os.environ, "BB_AUTH_DECLARE": SCRIPT},
-            capture_output=True, text=True, timeout=15)
-        return out.stdout.strip()
+    def run_cmd_human(self, argv):
+        """Run the shim with agent detection stubbed off — deterministic human
+        passthrough even when the ambient test process sits under an agent
+        (e.g. agent-driven CI)."""
+        stub = (
+            "import importlib.util,os,sys;"
+            "from importlib.machinery import SourceFileLoader;"
+            "p=os.environ['BB_AUTH_DECLARE'];"
+            "s=importlib.util.spec_from_file_location('m',p,loader=SourceFileLoader('m',p));"
+            "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+            "m._detect_agent=lambda:None;"
+            "m._shim_mode(sys.argv[1],sys.argv[2:])"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", stub] + argv,
+            env={**self.env, "BB_AUTH_DECLARE": SCRIPT},
+            timeout=15, capture_output=True, text=True)
 
     # --- shim behavior ---
 
     def test_human_sudo_passthrough(self):
-        if self.detects_agent():
-            self.skipTest("test environment itself runs under a recognized agent")
         self.start_daemon()
-        self.run_cmd(["sudo", "pacman", "-Syu"])
+        self.run_cmd_human(["sudo", "pacman", "-Syu"])
         self.assertIn("sudo pacman -Syu", self.exec_log())
         self.assertNotIn("pkexec", self.exec_log())
         self.assertEqual(self.daemon.payloads, [])
@@ -208,6 +216,29 @@ class ShimCase(unittest.TestCase):
         self.assertIsNone(m._shim_rewrite("sudo", ["--", "id"]))
         self.assertIsNone(m._shim_rewrite("sudo", []))
         self.assertIsNone(m._shim_rewrite("pkexec", ["id"]))
+        # Shell metacharacters in ANY argument must decline — parity with the
+        # harness hook's refusal class.
+        self.assertIsNone(m._shim_rewrite("sudo", ["sh", "-c", "a|b"]))
+        self.assertIsNone(m._shim_rewrite("sudo", ["a|b"]))
+        self.assertIsNone(m._shim_rewrite("sudo", ["x", "&&", "y"]))
+        self.assertIsNone(m._shim_rewrite("sudo", ["$(whoami)"]))
+        self.assertIsNone(m._shim_rewrite("sudo", ["cmd", "`id`"]))
+        self.assertIsNone(m._shim_rewrite("sudo", ["cmd", ">out"]))
+        self.assertEqual(m._rewrite_sudo(["sudo", "pacman", "-Syu"]), ["pkexec", "pacman", "-Syu"])
+        self.assertEqual(m._rewrite_sudo(["sudo", "sh", "-c", "a;b"]), ["sudo", "sh", "-c", "a;b"])
+
+    def test_agent_token_matching(self):
+        m = _load_module()
+        # Exact basenames, path segments, and script-entry forms match.
+        self.assertEqual(m._agent_from_token("/opt/claude-code/cli.js"), "claude-code")
+        self.assertEqual(m._agent_from_token("/usr/lib/node_modules/@google/gemini-cli/x.js"), "gemini-cli")
+        self.assertEqual(m._agent_from_token("agy"), "gemini-cli")
+        self.assertEqual(m._agent_from_token("codex.js"), "codex")
+        # Lookalikes must not match.
+        self.assertIsNone(m._agent_from_token("node"))
+        self.assertIsNone(m._agent_from_token("devin-notes.md"))
+        self.assertIsNone(m._agent_from_token("strategy"))
+        self.assertIsNone(m._agent_from_token("agyx"))
 
     def test_real_binary_skips_self(self):
         m = _load_module()

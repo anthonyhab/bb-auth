@@ -26,9 +26,18 @@ and the daemon's OS-resolved process identity (`docs/PROVIDER_CONTRACT.md` §3.1
 The hook **fails open**: malformed input, an unreachable daemon, or any error
 leaves the command unchanged and lets it run. The `sudo`→`pkexec` rewrite is
 deliberately conservative — only a clean leading `sudo CMD` with no options,
-env assignments, or shell metacharacters is rewritten; anything compound or
-option-bearing runs unchanged (still with intent declared), because pkexec's
-flags and minimal environment differ from sudo's.
+env assignments, or shell metacharacters is rewritten, and **only when the
+daemon acknowledges** the declaration: with no supervised agent running,
+`pkexec` could hard-fail where `sudo` would have worked, so a dead daemon means
+the command runs on its original auth path. Anything compound or option-bearing
+runs unchanged (still with intent declared), because pkexec's flags and minimal
+environment differ from sudo's.
+
+On Claude-format harnesses the rewrite envelope carries
+`permissionDecision: "allow"` — required for the harness to merge the updated
+input. That "allow" only skips the *harness's own* permission prompt for the
+rewritten call; the escalation is still gated by polkit at the bb-auth prompt.
+It never approves the original `sudo` — the tool input is replaced.
 
 The daemon correlates a declaration to the polkit request by **shared agent
 process ancestry** (pid *and* start-time, so a recycled pid fails closed) — not
@@ -111,11 +120,28 @@ Gemini does not expose a transcript path, so the reason falls back to
 "(no rationale captured)" — the escalation is still attributed, routed through
 pkexec, and the agent is identified by ancestry.
 
-### Others (opencode, codex, aider, …)
+### opencode
+
+opencode has a plugin API instead of hook commands. Install the plugin into
+`~/.config/opencode/plugins/` (or the project's `.opencode/plugin/`):
+
+```bash
+mkdir -p ~/.config/opencode/plugins
+cp /usr/share/bb-auth/integrations/opencode/bb-auth-plugin.js \
+   ~/.config/opencode/plugins/
+```
+
+The plugin hooks `tool.execute.before` on the `bash` tool: it declares intent
+over the bb-auth socket and rewrites a clean leading `sudo`/`doas` to `pkexec`
+via the mutable `output.args.command`. Note: some opencode versions have an
+upstream bug where `output.args` mutations do not propagate — if the rewrite
+does not take effect, the declaration still lands and the PATH shims remain
+the reliable fallback.
+
+### Others (codex, aider, …)
 
 No hook format — use the PATH shims (`bb-auth-declare --print-shim-dir`, see
-README → Agent Supervision) or the voluntary `bb-auth-declare` CLI. The opencode
-plugin in `../opencode/` additionally covers command-string rewriting.
+README → Agent Supervision) or the voluntary `bb-auth-declare` CLI.
 
 ## Verify
 

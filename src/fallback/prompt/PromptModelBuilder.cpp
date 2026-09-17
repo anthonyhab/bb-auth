@@ -226,7 +226,9 @@ namespace bb::fallback::prompt {
         // Declared intent — display/audit only. Surfaced so a human supervising an
         // auto-mode agent can see the stated reason; the decision is unaffected.
         const QJsonObject intent = context.value("intent").toObject();
-        model.reason             = normalizeDetailText(intent.value("reason").toString());
+        // Cap the rendered reason: it is self-asserted text, and an oversized
+        // declaration must not push the auth buttons off-window.
+        model.reason             = trimToLength(normalizeDetailText(intent.value("reason").toString()), 300);
         model.intentMismatch     = intent.value("mismatch").toBool();
         model.agentRequestor     = isAgentRequestor;
         if (model.summary.isEmpty() && !model.details.isEmpty()) {

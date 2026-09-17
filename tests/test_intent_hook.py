@@ -166,7 +166,9 @@ class HookCase(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(self.declared(), [])
 
-    def test_daemon_down_still_allows_and_rewrites(self):
+    def test_daemon_down_leaves_command_unchanged(self):
+        # No supervised agent behind pkexec: rewriting would strand the command
+        # on a harder auth path than sudo. Fail-open = run it verbatim.
         self.daemon.stop()
         os.unlink(self.sockpath)
         proc = self.invoke({
@@ -174,9 +176,18 @@ class HookCase(unittest.TestCase):
             "tool_input": {"command": "sudo true"},
         })
         self.assertEqual(proc.returncode, 0)
-        out = json.loads(proc.stdout)
-        self.assertEqual(
-            out["hookSpecificOutput"]["updatedInput"]["command"], "pkexec true")
+        self.assertEqual(proc.stdout.strip(), "")
+
+    def test_non_leading_privileged_mention_does_not_declare(self):
+        # `cat sudo.conf` / `echo sudo` must not clobber a real pending reason
+        # with "(no rationale captured)" — declaration is for leading tokens.
+        for cmd in ("cat sudo.conf", "echo pkexec | xargs -i echo {}", "grep doas /etc/fstab"):
+            proc = self.invoke({
+                "tool_name": "Bash",
+                "tool_input": {"command": cmd},
+            })
+            self.assertEqual(proc.returncode, 0)
+        self.assertEqual(self.declared(), [])
 
 
 if __name__ == "__main__":

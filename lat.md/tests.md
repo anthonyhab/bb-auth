@@ -45,3 +45,35 @@ A correlated intent is consumed by the first matching request — it cannot be r
 ### Unbound intent ignored
 
 A declaration that never correlates to a request expires harmlessly — stray declares cannot poison later unrelated prompts.
+
+## Fuzz boundaries
+
+Deterministic seeded fuzz at the two trust boundaries — `parseProviderManifest` (`src/core/providers/`) and `IpcServer` frames (`src/core/ipc/`). Failures reproduce byte-for-byte from the fixed seeds in `tests/test_fuzz_inputs.cpp`.
+
+### Manifest mutations never crash
+
+1500 seeded mutations of a valid manifest (truncate/flip/insert/splice/duplicate) must return a structured `ParseResult` — ok implies `isValid()`, failure implies a non-empty error.
+
+### Adversarial manifest structures bounded
+
+Deep nesting, huge strings/numbers, lone surrogates, duplicate keys, and comma floods must parse or fail bounded — no hang, no crash.
+
+### Garbage IPC frames never wedge server
+
+Random byte frames interleaved with pings on one connection must each yield a reply and the ping must still answer pong — the daemon survives hostile input on a live socket.
+
+### Adversarial IPC frames handled
+
+Non-object JSON, null/numeric/empty/duplicate `type`, padded and escaped frames must each produce a bounded response — error or dispatch — with the connection staying usable.
+
+## Daemon lifecycle
+
+Socket ownership rules enforced by `IpcServer::start` (`src/core/ipc/`) — a second daemon must never steal a live agent's socket path.
+
+### Live socket never hijacked
+
+Starting on a path owned by a live daemon must fail closed — the running agent keeps its socket and its polkit registration; the contender exits.
+
+### Stale socket reclaimed
+
+A socket file left by a dead daemon must be removed and rebound — a crash must not wedge future starts.

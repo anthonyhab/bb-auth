@@ -238,6 +238,8 @@ qt_add_executable(bb-auth-tests
     tests/test_prompt_extractors.cpp
     tests/test_request_context.cpp
     tests/test_intent_store.cpp
+    tests/test_fuzz_inputs.cpp
+    tests/test_prompt_snapshots.cpp
 
     src/core/Session.cpp
     src/core/Session.hpp

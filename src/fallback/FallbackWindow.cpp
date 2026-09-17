@@ -150,6 +150,8 @@ namespace bb {
         m_reasonLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
         m_reasonLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
         m_reasonLabel->setStyleSheet("font-style: italic;");
+        // Declared reasons are self-asserted text: render literally, never as Qt markup.
+        m_reasonLabel->setTextFormat(Qt::PlainText);
         m_reasonLabel->hide();
         m_contextLabel = new QLabel(m_contentWidget);
         m_contextLabel->setWordWrap(true);

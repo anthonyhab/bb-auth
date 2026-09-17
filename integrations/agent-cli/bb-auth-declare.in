@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import select
 import socket
 import sys
@@ -32,6 +33,45 @@ _TTL_MS = 20000
 _MAX_REASON = 2000
 _SHIM_TOOLS = ("sudo", "doas", "pkexec")
 _SHIM_REASON = "Agent ran a privileged command without declaring a reason"
+
+# Token-aware agent detection: a process is a known agent only when an argv
+# token's basename (or comm/exe name) *is* an alias — never when a needle
+# appears anywhere in the cmdline (`vim devin-notes.md` must not activate the
+# shim). Mirrors the alias table in src/core/RequestContext.cpp.
+_AGENT_ALIASES = {
+    "claude": "claude-code", "claude-code": "claude-code",
+    "codex": "codex", "codex-cli": "codex",
+    "gemini": "gemini-cli", "gemini-cli": "gemini-cli", "agy": "gemini-cli",
+    "aider": "aider", "aider-chat": "aider",
+    "cursor-agent": "cursor-agent",
+    "opencode": "opencode",
+    "copilot": "copilot-cli", "copilot-cli": "copilot-cli", "gh-copilot": "copilot-cli",
+    "devin": "devin", "devin-cli": "devin",
+}
+_SCRIPT_EXTS = (".js", ".mjs", ".cjs", ".py", ".exe", ".cmd")
+_META = re.compile(r"[|&;<>`$()\n]")
+
+
+def _agent_alias(base: str) -> str | None:
+    """Map a basename to an agent kind: exact alias, or alias + script ext
+    (codex.js, claude.exe, aider.py)."""
+    if base in _AGENT_ALIASES:
+        return _AGENT_ALIASES[base]
+    for ext in _SCRIPT_EXTS:
+        if base.endswith(ext) and base[: -len(ext)] in _AGENT_ALIASES:
+            return _AGENT_ALIASES[base[: -len(ext)]]
+    return None
+
+
+def _agent_from_token(token: str) -> str | None:
+    """Match a cmdline/exe token: every path segment may be an exact alias
+    (real installs live under dirs like /opt/claude-code), plus the basename's
+    script-entry form. Segment equality still rejects `devin-notes.md`."""
+    segs = [s for s in token.split("/") if s]
+    for seg in segs:
+        if seg.lower() in _AGENT_ALIASES:
+            return _AGENT_ALIASES[seg.lower()]
+    return _agent_alias(segs[-1].lower()) if segs else _agent_alias(token.lower())
 
 # Substituted by configure_file at build time; "@…@" survives a source-tree run.
 _SHIM_DIR = "@BB_AUTH_SHIM_DIR@"
@@ -78,22 +118,10 @@ def _detect_agent() -> str | None:
                     exe = ""
 
                 exe_name = os.path.basename(exe).lower() if exe else ""
-                if name.lower() == "agy" or exe_name == "agy" or cmdline.strip().startswith("agy"):
-                    return "gemini-cli"
-
-                signatures = [
-                    ("claude-code", "claude"),
-                    ("codex", "codex"),
-                    ("gemini-cli", "gemini"),
-                    ("aider", "aider"),
-                    ("cursor-agent", "cursor-agent"),
-                    ("opencode", "opencode"),
-                    ("copilot-cli", "copilot"),
-                    ("devin", "devin"),
-                ]
-                haystack = (cmdline + " " + exe).lower()
-                for kind, needle in signatures:
-                    if needle in haystack:
+                if kind := _agent_alias(name.lower()) or _agent_from_token(exe):
+                    return kind
+                for token in cmdline.split():
+                    if kind := _agent_from_token(token):
                         return kind
 
                 if ppid <= 1 or ppid == pid:
@@ -161,11 +189,15 @@ def _report(status: dict) -> None:
 
 
 def _rewrite_sudo(argv: list) -> list:
-    """Rewrite a plain `sudo CMD` → `pkexec CMD`. Conservative: no options, no env=val."""
+    """Rewrite a plain `sudo CMD` → `pkexec CMD`. Conservative: no options, no
+    env=val, no shell metacharacters in ANY argument — parity with the harness
+    hook's refusal class (openspec add-agent-path-shim spec)."""
     if not argv or argv[0] != "sudo" or len(argv) < 2:
         return argv
     rest = argv[1:]
     if rest[0].startswith("-") or "=" in rest[0]:
+        return argv
+    if any(_META.search(a) for a in rest):
         return argv
     return ["pkexec"] + rest
 
@@ -175,6 +207,8 @@ def _shim_rewrite(tool: str, argv: list):
     if tool not in ("sudo", "doas") or not argv:
         return None
     if argv[0].startswith("-") or "=" in argv[0]:
+        return None
+    if any(_META.search(a) for a in argv):
         return None
     return ["pkexec"] + argv
 
@@ -198,11 +232,11 @@ def _exec_real(name: str, argv: list):
     real = _real_binary(name)
     if real:
         os.execv(real, [name] + argv)
-    shimdir = os.path.dirname(os.path.abspath(__file__))
+    shimdir = os.path.dirname(os.path.realpath(__file__))
     env = dict(os.environ)
     env["PATH"] = os.pathsep.join(
         d for d in env.get("PATH", "").split(os.pathsep)
-        if os.path.abspath(d or ".") != shimdir
+        if os.path.realpath(d or ".") != shimdir
     )
     try:
         os.execvpe(name, [name] + argv, env)

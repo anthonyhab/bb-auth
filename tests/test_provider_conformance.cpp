@@ -126,6 +126,8 @@ namespace bb {
         void providerRegistry_enforcesActiveProviderAuthorizationBoundary();
         void providerRegistry_untrustedProviderNeverBecomesActiveOrAuthorized();
         void providerRegistry_clampsRequestedPriority();
+        void providerRegistry_activeCrash_failsOverToSurvivor();
+        void providerRegistry_restartedProvider_canReattestAndServe();
         void discovery_honorsDefaultDirectoryPrecedence();
     };
 
@@ -322,6 +324,64 @@ namespace bb {
         QVERIFY(lo.server != nullptr);
         const auto loProvider = registry.registerProvider(lo.server.get(), QJsonObject{{"name", "Lo"}, {"kind", "custom"}, {"priority", -2147483647}}, true);
         QCOMPARE(loProvider.priority, agent::PROVIDER_PRIORITY_MIN);
+    }
+
+    void ProviderConformanceTest::providerRegistry_activeCrash_failsOverToSurvivor() {
+        LocalSocketFixture fixture;
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
+
+        qint64                  nowMs = 1000;
+        agent::ProviderRegistry registry([&nowMs] { return nowMs; });
+
+        ConnectedSocket high = fixture.connect();
+        QVERIFY(high.server != nullptr);
+        ConnectedSocket low = fixture.connect();
+        QVERIFY(low.server != nullptr);
+
+        registry.registerProvider(high.server.get(), QJsonObject{{"name", "High"}, {"kind", "custom"}, {"priority", 90}}, true);
+        registry.registerProvider(low.server.get(), QJsonObject{{"name", "Low"}, {"kind", "custom"}, {"priority", 10}}, true);
+        QVERIFY(registry.recomputeActiveProvider());
+        QCOMPARE(registry.activeProvider(), high.server.get());
+        QVERIFY(registry.isAuthorized(high.server.get()));
+
+        // Provider crash: the client end dies without an unregister — the daemon
+        // observes a dead socket, not a polite goodbye.
+        high.client->abort();
+        QTRY_VERIFY_WITH_TIMEOUT(high.server->state() != QLocalSocket::ConnectedState, 2000);
+
+        QVERIFY(registry.recomputeActiveProvider());
+        QCOMPARE(registry.activeProvider(), low.server.get());
+        QVERIFY(registry.isAuthorized(low.server.get()));
+        QVERIFY(!registry.isAuthorized(high.server.get()));
+        QVERIFY(!registry.contains(high.server.get()));
+    }
+
+    void ProviderConformanceTest::providerRegistry_restartedProvider_canReattestAndServe() {
+        LocalSocketFixture fixture;
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
+
+        qint64                  nowMs = 1000;
+        agent::ProviderRegistry registry([&nowMs] { return nowMs; });
+
+        ConnectedSocket first = fixture.connect();
+        QVERIFY(first.server != nullptr);
+        registry.registerProvider(first.server.get(), QJsonObject{{"name", "Flaky"}, {"kind", "custom"}, {"priority", 50}}, true);
+        QVERIFY(registry.recomputeActiveProvider());
+        QCOMPARE(registry.activeProvider(), first.server.get());
+
+        // Crash, then the daemon relaunches the provider: a NEW socket connects
+        // and re-attests. The dead socket must not linger or shadow the restart.
+        first.client->abort();
+        QTRY_VERIFY_WITH_TIMEOUT(first.server->state() != QLocalSocket::ConnectedState, 2000);
+        QVERIFY(registry.recomputeActiveProvider());
+        QVERIFY(!registry.hasActiveProvider());
+
+        ConnectedSocket restarted = fixture.connect();
+        QVERIFY(restarted.server != nullptr);
+        registry.registerProvider(restarted.server.get(), QJsonObject{{"name", "Flaky"}, {"kind", "custom"}, {"priority", 50}}, true);
+        QVERIFY(registry.recomputeActiveProvider());
+        QCOMPARE(registry.activeProvider(), restarted.server.get());
+        QVERIFY(registry.isAuthorized(restarted.server.get()));
     }
 
     void ProviderConformanceTest::discovery_honorsDefaultDirectoryPrecedence() {

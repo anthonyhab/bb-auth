@@ -165,6 +165,29 @@ void RequestContextTest::testAgentDetectedFromCmdline() {
     const AgentMatch m3 = RequestContextHelper::detectAgent(devinProc);
     QVERIFY(m3.isValid());
     QCOMPARE(m3.kind, QString("devin"));
+
+    // Lookalike names must not match: token/segment equality, not substring —
+    // `vim devin-notes.md` and `agyx` are not agents.
+    ProcInfo editorProc;
+    editorProc.name    = "vim";
+    editorProc.exe     = "/usr/bin/vim";
+    editorProc.cmdline = "vim /home/user/devin-notes.md";
+    QVERIFY(!RequestContextHelper::detectAgent(editorProc).isValid());
+
+    ProcInfo agyx;
+    agyx.name    = "agyx";
+    agyx.exe     = "/usr/local/bin/agyx";
+    agyx.cmdline = "agyx --serve";
+    QVERIFY(!RequestContextHelper::detectAgent(agyx).isValid());
+
+    // A real install dir still resolves: the alias is a path segment.
+    ProcInfo optClaude;
+    optClaude.name    = "node";
+    optClaude.exe     = "/usr/bin/node";
+    optClaude.cmdline = "node /opt/claude-code/cli.js --print";
+    const AgentMatch m4 = RequestContextHelper::detectAgent(optClaude);
+    QVERIFY(m4.isValid());
+    QCOMPARE(m4.kind, QString("claude-code"));
 }
 
 void RequestContextTest::testAgentWinsOverAncestry() {

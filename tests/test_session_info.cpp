@@ -18,6 +18,8 @@ int runClassifyRequestTests(int argc, char** argv);
 int runPromptExtractorsTests(int argc, char** argv);
 int runRequestContextTests(int argc, char** argv);
 int runIntentStoreTests(int argc, char** argv);
+int runFuzzInputTests(int argc, char** argv);
+int runPromptSnapshotTests(int argc, char** argv);
 
 class SessionInfoTest : public QObject {
     Q_OBJECT
@@ -93,6 +95,8 @@ int main(int argc, char** argv) {
     const int       conformanceResult    = runProviderConformanceTests(argc, argv);
     const int       trustResult          = runProviderTrustTests(argc, argv);
     const int       ipcContractResult    = runIpcContractTests(argc, argv);
+    const int       fuzzResult           = runFuzzInputTests(argc, argv);
+    const int       snapshotResult       = runPromptSnapshotTests(argc, argv);
     if (sessionResult != 0) {
         return sessionResult;
     }
@@ -138,7 +142,13 @@ int main(int argc, char** argv) {
     if (trustResult != 0) {
         return trustResult;
     }
-    return ipcContractResult;
+    if (ipcContractResult != 0) {
+        return ipcContractResult;
+    }
+    if (fuzzResult != 0) {
+        return fuzzResult;
+    }
+    return snapshotResult;
 }
 
 #include "test_session_info.moc"

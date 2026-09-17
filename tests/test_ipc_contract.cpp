@@ -12,6 +12,7 @@
 #include <QJsonObject>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QFile>
 #include <QTemporaryDir>
 
 namespace bb {
@@ -73,6 +74,10 @@ namespace bb {
                 return m_client;
             }
 
+            QString socketPath() const {
+                return m_socketPath;
+            }
+
             bb::IpcServer& server() {
                 return m_server;
             }
@@ -121,6 +126,9 @@ namespace bb {
         void unknownType_returnsError();
         void oversizedBufferedInput_disconnectsClient();
         void incompleteFrame_disconnectsAfterTimeout();
+        void secondStart_onLiveSocket_failsAndKeepsOriginal();
+        void start_onStaleSocketFile_succeeds();
+        void restart_afterStop_succeeds();
     };
 
     void IpcContractTest::invalidJson_returnsError() {
@@ -191,6 +199,56 @@ namespace bb {
 
         // The server drops the connection once the incomplete frame ages past the timeout.
         QTRY_COMPARE_WITH_TIMEOUT(socket.state(), QLocalSocket::UnconnectedState, 2000);
+    }
+
+    // @lat: [[tests#Daemon lifecycle#Live socket never hijacked]]
+    void IpcContractTest::secondStart_onLiveSocket_failsAndKeepsOriginal() {
+        IpcContractFixture fixture;
+        REQUIRE_LOCAL_SOCKET_LISTENING(fixture);
+
+        // A second daemon racing onto the same path must fail closed — never
+        // unlink the live socket and hijack the path from the running agent.
+        IpcServer usurper;
+        QVERIFY(!usurper.start(fixture.socketPath()));
+
+        // The original server is untouched and still serving.
+        auto& socket = fixture.client();
+        QVERIFY(socket.write("{\"type\":\"ping\"}\n") > 0);
+        QVERIFY(socket.waitForBytesWritten(1000));
+        const auto reply = fixture.readJsonLine();
+        QCOMPARE(reply.value("type").toString(), QString("pong"));
+    }
+
+    // @lat: [[tests#Daemon lifecycle#Stale socket reclaimed]]
+    void IpcContractTest::start_onStaleSocketFile_succeeds() {
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        const QString socketPath = tempDir.path() + "/stale.sock";
+
+        // A dead daemon leaves the socket node behind — the next start must
+        // reclaim it rather than refuse forever.
+        QFile stale(socketPath);
+        QVERIFY(stale.open(QIODevice::WriteOnly));
+        stale.close();
+
+        IpcServer server;
+        QVERIFY(server.start(socketPath));
+        server.stop();
+    }
+
+    void IpcContractTest::restart_afterStop_succeeds() {
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        const QString socketPath = tempDir.path() + "/restart.sock";
+
+        IpcServer first;
+        QVERIFY(first.start(socketPath));
+        first.stop();
+
+        // Shutdown→startup race: the replacement daemon must bind cleanly.
+        IpcServer second;
+        QVERIFY(second.start(socketPath));
+        second.stop();
     }
 
 } // namespace bb

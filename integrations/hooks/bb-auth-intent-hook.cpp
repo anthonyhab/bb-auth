@@ -27,6 +27,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -128,29 +129,42 @@ namespace {
         return text.left(kMaxReason);
     }
 
-    // Fire the declare to the daemon and drain one reply (so it can resolve our peer
-    // creds before we close). Silent on any failure — the command still runs.
+    // Fire the declare to the daemon and wait (bounded) for its reply. Returns
+    // true only when the daemon answered `{"type":"ok"}` — proof the supervised
+    // path is live. Silent on any failure — the command still runs unchanged.
     // @lat: [[agent-intent#Harness hook channel]]
-    void declareIntent(const QJsonObject &payload) {
+    bool declareIntent(const QJsonObject &payload) {
         const QByteArray path = socketPath().toLocal8Bit();
         sockaddr_un addr{};
         if (path.size() >= static_cast<int>(sizeof(addr.sun_path)))
-            return;
+            return false;
         const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
         if (fd < 0)
-            return;
+            return false;
         addr.sun_family = AF_UNIX;
         ::memcpy(addr.sun_path, path.constData(), static_cast<size_t>(path.size()));
+        bool ok = false;
         if (::connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0) {
             QByteArray line = QJsonDocument(payload).toJson(QJsonDocument::Compact);
             line.append('\n');
             const ssize_t wrote = ::write(fd, line.constData(), static_cast<size_t>(line.size()));
-            (void) wrote;
-            char buf[256];
-            const ssize_t got = ::read(fd, buf, sizeof(buf));
-            (void) got;
+            if (wrote == line.size()) {
+                // Bounded wait: a same-UID squatter that accepts-but-never-replies
+                // must not hang the agent's tool call.
+                pollfd pfd{fd, POLLIN, 0};
+                if (::poll(&pfd, 1, 500) > 0 && (pfd.revents & POLLIN)) {
+                    char buf[256];
+                    const ssize_t got = ::read(fd, buf, sizeof(buf) - 1);
+                    if (got > 0) {
+                        buf[got] = '\0';
+                        const auto reply = QJsonDocument::fromJson(QByteArray(buf, static_cast<int>(got))).object();
+                        ok = reply.value(QStringLiteral("type")).toString() == QStringLiteral("ok");
+                    }
+                }
+            }
         }
         ::close(fd);
+        return ok;
     }
 
     // True only for a clean, simple leading `sudo` command — no options, no env
@@ -162,21 +176,26 @@ namespace {
     bool simpleSudoRewrite(const QString &command, QString *rewritten) {
         static const QRegularExpression meta(QStringLiteral("[|&;<>`$()\\n]"));
         const QString trimmed = command.trimmed();
-        if (!trimmed.startsWith(QStringLiteral("sudo ")))
+        const bool    isSudo  = trimmed.startsWith(QStringLiteral("sudo "));
+        const bool    isDoas  = trimmed.startsWith(QStringLiteral("doas "));
+        if (!isSudo && !isDoas)
             return false;
         if (meta.match(trimmed).hasMatch())
             return false;
-        const QString rest = trimmed.mid(5).trimmed(); // after "sudo "
+        const QString rest = trimmed.mid(trimmed.indexOf(QLatin1Char(' '))).trimmed();
         if (rest.isEmpty() || rest.startsWith(QLatin1Char('-')))
-            return false; // sudo options (-i, -u, -E, ...) don't translate cleanly
+            return false; // options (-i, -u, -E, ...) don't translate cleanly
         if (rest.section(QLatin1Char(' '), 0, 0).contains(QLatin1Char('=')))
-            return false; // `sudo VAR=x cmd` env assignment is sudo-specific
+            return false; // `VAR=x cmd` env assignment is sudo/doas-specific
         *rewritten = QStringLiteral("pkexec ") + rest;
         return true;
     }
 
+    // A privileged *leading* token only — `cat sudo.conf` or `echo sudo | ...`
+    // must not declare: a stray "(no rationale captured)" would clobber a real
+    // pending reason (the daemon correlates latest-wins per agent).
     bool isPrivileged(const QString &command) {
-        static const QRegularExpression re(QStringLiteral("\\b(sudo|pkexec|doas)\\b"));
+        static const QRegularExpression re(QStringLiteral("^\\s*(sudo|pkexec|doas)\\b"));
         return re.match(command).hasMatch();
     }
 
@@ -244,9 +263,12 @@ int main() {
     const QString agentId = agentIdFor(harness);
     if (!agentId.isEmpty())
         declare.insert(QStringLiteral("agent"), agentId);
-    declareIntent(declare);
+    const bool daemonAnswered = declareIntent(declare);
 
-    if (rewrite && harness != Harness::Unknown)
+    // Rewrite only when the daemon acknowledged: with no supervised agent,
+    // `pkexec` can hard-fail where `sudo` would have worked — keep the command
+    // on its original auth path instead (fail-open per ADR-0003).
+    if (rewrite && daemonAnswered && harness != Harness::Unknown)
         emitRewrite(harness, rewritten);
     return 0; // always allow; polkit/pkexec remains the gate
 }

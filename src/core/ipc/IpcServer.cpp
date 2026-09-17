@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QThread>
 
 #include <algorithm>
 
@@ -47,8 +48,24 @@ namespace bb {
         if (m_server)
             return false;
 
-        // Remove stale socket file
+        // Remove a stale socket file left by a dead daemon — but probe first:
+        // a socket that still accepts a connection belongs to a LIVE daemon,
+        // and unlinking it would let this instance silently hijack the path
+        // while the original agent keeps running orphaned (still registered
+        // with polkit). Fail closed instead of stealing the path.
         if (QFile::exists(socketPath)) {
+            // Retry briefly: a saturated listen backlog can drop an otherwise
+            // healthy peer's probe — one refusal is not proof of death.
+            for (int attempt = 0; attempt < 3; ++attempt) {
+                QLocalSocket probe;
+                probe.connectToServer(socketPath);
+                if (probe.waitForConnected(250)) {
+                    return false;
+                }
+                if (attempt < 2) {
+                    QThread::msleep(50);
+                }
+            }
             QFile::remove(socketPath);
         }
 
