@@ -149,7 +149,10 @@ namespace bb::providers {
         QList<ProviderManifest> autostart;
         autostart.reserve(manifests.size());
         for (const auto& manifest : manifests) {
-            if (manifest.autostart) {
+            // On-demand launches may pick any autostart provider; eager keep-hot
+            // launches additionally require `resident`, so non-resident providers
+            // only ever exist while a session is actually pending.
+            if (manifest.autostart && (!eager || manifest.resident)) {
                 autostart.push_back(manifest);
             }
         }

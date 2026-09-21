@@ -133,6 +133,11 @@ namespace bb::providers {
         }
         manifest.autostart = json.contains("autostart") ? json.value("autostart").toBool() : true;
 
+        if (json.contains("resident") && !json.value("resident").isBool()) {
+            return failure(QStringLiteral("resident must be a boolean"));
+        }
+        manifest.resident = json.contains("resident") ? json.value("resident").toBool() : true;
+
         QString parseError;
         if (!parseStringArray(json.value("args"), manifest.args, QStringLiteral("args"), parseError)) {
             return failure(parseError);

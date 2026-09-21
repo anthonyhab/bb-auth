@@ -1,14 +1,24 @@
 # Omarchy prompt
 
-The omarchy desktop prompt is a resident, daemon-launched quickshell provider — themed by reusing omarchy's design system, trusted by construction via [[provider-trust#Daemon-launch attestation]]. (ADR 0002.)
+The omarchy desktop prompt is a daemon-launched quickshell provider — themed by reusing omarchy's design system, trusted by construction via [[provider-trust#Daemon-launch attestation]], and non-resident: it exists only while a session needs it. (ADR 0002; residency made opt-out in 2026-09.)
 
 ## Resident eager launch
 
-After the IPC server binds, the daemon eager-launches the highest-priority **autostart** provider and relaunches it on disconnect, keeping a prompt resident for zero first-prompt latency.
+The daemon eager-launches the highest-priority autostart provider at startup and relaunches it on disconnect — but only when the manifest opts in (`resident: true`, the default).
 
 - `ProviderLauncher::tryLaunch(..., eager=true)` and `CAgent::ensureFallbackUiRunning(reason, eager)` drive the lifecycle (`src/core/providers/`, `src/core/Agent.cpp`).
-- Eager launch only ever selects a real autostart provider — never the legacy env override or the built-in fallback, which stay on-demand safety nets.
+- Eager launch only ever selects a real autostart **and resident** provider — never the legacy env override or the built-in fallback, which stay on-demand safety nets.
+- On-demand launch (`eager=false`, pending session required) still selects the same autostart manifests regardless of `resident`, so a non-resident provider keeps full priority when it matters.
 - With no autostart provider configured the daemon stays fully on-demand.
+
+## On-demand residency
+
+A manifest may set `"resident": false` to trade first-prompt latency for footprint: nothing is launched until a session actually pends, and the provider exits when its session store drains instead of staying resident.
+
+- The omarchy prompt uses this: the second QML engine cost (~190–210 MB resident, measured) only exists for the seconds a prompt is on screen.
+- The prompt-side half lives in `BbPrompt.qml`: `sawSession` + `idleExitTimer` quit once the store drains after having served; `orphanExitTimer` bounds a launch whose session never arrives; losing active status while connected also exits (it could never serve again).
+- Every session launch is a fresh process, so each prompt gets a fresh single-use attestation — non-residency is strictly stronger than residency under [[provider-trust#Daemon-launch attestation]], not weaker.
+- Cost: ~0.5–1.5 s of quickshell cold-start latency per prompt (ADR 0002 chose resident for latency; reversed when the resident footprint was measured).
 
 ## Design system reuse
 
@@ -32,4 +42,4 @@ The prompt calls `Qt.quit()` when a disconnect follows a successful connect (`ev
 A `startDetached` child inherits the daemon's hardened systemd unit (MDWE, `@system-service` filter, `ProtectSystem=strict`, empty capability set) and quickshell provably runs under it.
 
 - The V4 engine falls back to the interpreter under `MemoryDenyWriteExecute`; the layer-shell window still renders. **No hardening relaxation is needed.**
-- Cost: a second resident QML engine (~tens of MB), accepted for the latency and trust win.
+- Non-resident launch keeps this property: the on-demand `startDetached` path is the same code path as eager launch.

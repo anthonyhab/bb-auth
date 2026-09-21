@@ -2,6 +2,8 @@
 
 #include "../Session.hpp"
 
+#include <QStringList>
+
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -18,6 +20,9 @@ namespace bb::agent {
         std::optional<QJsonObject> updateInfo(const QString& id, const QString& info);
         bool                       updatePinentryRetry(const QString& id, int curRetry, int maxRetries);
         std::optional<QJsonObject> closeSession(const QString& id, Session::Result result);
+        // Ids of sessions older than ttlMs. Callers close them via closeSession so the
+        // session.closed event still reaches the active provider.
+        QStringList                expiredIds(qint64 nowMs, qint64 ttlMs) const;
         Session*                   getSession(const QString& id);
         const SessionMap&          sessions() const;
         bool                       empty() const;

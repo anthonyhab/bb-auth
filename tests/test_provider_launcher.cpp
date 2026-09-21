@@ -15,6 +15,8 @@ namespace bb {
         void skipsLaunchWhenActiveProviderOrNoSessions();
         void eagerLaunchesAutostartProviderWithNoPendingSessions();
         void eagerNeverFallsBackToLegacyBinary();
+        void eagerSkipsNonResidentProvider();
+        void onDemandLaunchesNonResidentProvider();
     };
 
     void ProviderLauncherTest::usesLegacyEnvOverrideWhenSet() {
@@ -211,6 +213,64 @@ namespace bb {
         QVERIFY(withLegacyEnv.detail.contains("eager"));
 
         QCOMPARE(attempts, 0);
+    }
+
+    void ProviderLauncherTest::eagerSkipsNonResidentProvider() {
+        qint64                      nowMs    = 1000;
+        int                         attempts = 0;
+
+        providers::ProviderLauncher launcher([&nowMs] { return nowMs; },
+                                             [&attempts](const QString&, const QStringList&, const QProcessEnvironment&) {
+                                                 attempts += 1;
+                                                 return qint64{4242};
+                                             });
+
+        QList<providers::ProviderManifest> manifests;
+        providers::ProviderManifest        manifest;
+        manifest.id        = "omarchy-prompt";
+        manifest.name      = "Omarchy";
+        manifest.kind      = "quickshell";
+        manifest.priority  = 100;
+        manifest.exec      = "/bin/true";
+        manifest.autostart = true;
+        manifest.resident  = false;
+        manifests.push_back(manifest);
+
+        // A non-resident provider must never be kept hot: eager launch skips it
+        // entirely, and the built-in fallback must not substitute for it either.
+        const auto result = launcher.tryLaunch(manifests, "/tmp/bb-auth.sock", "daemon-startup", false, false, QString(), "/bin/true", /*eager=*/true);
+        QVERIFY(!result.attempted);
+        QCOMPARE(attempts, 0);
+    }
+
+    void ProviderLauncherTest::onDemandLaunchesNonResidentProvider() {
+        qint64                      nowMs = 1000;
+        QString                     launchedProgram;
+
+        providers::ProviderLauncher launcher([&nowMs] { return nowMs; },
+                                             [&launchedProgram](const QString& program, const QStringList&, const QProcessEnvironment&) {
+                                                 launchedProgram = program;
+                                                 return qint64{4242};
+                                             });
+
+        QList<providers::ProviderManifest> manifests;
+        providers::ProviderManifest        manifest;
+        manifest.id        = "omarchy-prompt";
+        manifest.name      = "Omarchy";
+        manifest.kind      = "quickshell";
+        manifest.priority  = 100;
+        manifest.exec      = "/bin/true";
+        manifest.autostart = true;
+        manifest.resident  = false;
+        manifests.push_back(manifest);
+
+        // The same provider an eager launch skipped is still the right candidate
+        // once a session actually needs UI.
+        const auto result = launcher.tryLaunch(manifests, "/tmp/bb-auth.sock", "session-created", false, true, QString(), "/bin/false");
+        QVERIFY(result.attempted);
+        QVERIFY(result.launched);
+        QCOMPARE(result.providerId, QString("omarchy-prompt"));
+        QCOMPARE(launchedProgram, QString("/bin/true"));
     }
 
 } // namespace bb

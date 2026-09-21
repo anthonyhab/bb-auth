@@ -3,6 +3,7 @@
 #include "RequestContext.hpp"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMetaType>
@@ -33,6 +34,11 @@ namespace {
 
     inline constexpr int    PROVIDER_MAINTENANCE_INTERVAL_MS = 5000;
     inline constexpr qint64 FALLBACK_LAUNCH_COOLDOWN_MS      = 5000;
+    // A session whose requester vanished without closing (dead pinentry client,
+    // abandoned polkit prompt) would otherwise sit in the store forever: it is
+    // replayed into every newly launched provider, keeping a ~100 MB UI process
+    // alive with a dialog nobody can answer. Ten minutes unanswered is expired.
+    inline constexpr qint64 SESSION_TTL_MS                   = 10 * 60 * 1000;
 
     QJsonObject             readBootstrapState() {
         QJsonObject   bootstrap;
@@ -626,6 +632,11 @@ bool CAgent::hasActiveProvider() const {
 void CAgent::pruneStaleProviders() {
     if (m_providerRegistry.pruneStale()) {
         emitProviderStatus();
+    }
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    for (const QString& id : m_sessionStore.expiredIds(nowMs, SESSION_TTL_MS)) {
+        qInfo() << "Expiring session past TTL:" << id;
+        closeSession(id, bb::Session::Result::Cancelled);
     }
     if (!hasActiveProvider() && !m_sessionStore.empty()) {
         ensureFallbackUiRunning("provider-prune");

@@ -3,6 +3,6 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[architecture]] — daemon core, provider stack, fallback UI, entry modes
 - [[protocol]] — provider↔daemon IPC contract (v3.0) and versioning policy
 - [[provider-trust]] — daemon-launch attestation and fail-closed authorization
-- [[omarchy-prompt]] — resident quickshell provider themed by omarchy's design system
+- [[omarchy-prompt]] — on-demand quickshell provider themed by omarchy's design system
 - [[agent-intent]] — who+why attribution for agent-initiated privileged commands
 - [[tests]] — security-critical test specifications mapped to Qt tests

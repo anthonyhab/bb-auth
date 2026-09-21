@@ -10,6 +10,8 @@ namespace bb {
       private slots:
         void parseValidManifest();
         void parseValidManifestWithDefaults();
+        void parsesResidentFlag();
+        void rejectNonBooleanResident();
         void rejectInvalidJson();
         void rejectMissingRequiredFields();
         void rejectInvalidId();
@@ -59,9 +61,39 @@ namespace bb {
         QVERIFY(result.ok);
         QCOMPARE(result.manifest.priority, 0);
         QCOMPARE(result.manifest.autostart, true);
+        QCOMPARE(result.manifest.resident, true);
         QVERIFY(result.manifest.args.isEmpty());
         QVERIFY(result.manifest.env.isEmpty());
         QVERIFY(result.manifest.capabilities.isEmpty());
+    }
+
+    void ProviderManifestTest::parsesResidentFlag() {
+        const QByteArray json = R"({
+        "id":"omarchy-prompt",
+        "name":"Omarchy",
+        "kind":"quickshell",
+        "exec":"omarchy-bb-prompt",
+        "resident":false
+    })";
+
+        const auto       result = providers::parseProviderManifest(json);
+        QVERIFY(result.ok);
+        QCOMPARE(result.manifest.autostart, true);
+        QCOMPARE(result.manifest.resident, false);
+    }
+
+    void ProviderManifestTest::rejectNonBooleanResident() {
+        const QByteArray json = R"({
+        "id":"omarchy-prompt",
+        "name":"Omarchy",
+        "kind":"quickshell",
+        "exec":"omarchy-bb-prompt",
+        "resident":"yes"
+    })";
+
+        const auto       result = providers::parseProviderManifest(json);
+        QVERIFY(!result.ok);
+        QCOMPARE(result.error, QString("resident must be a boolean"));
     }
 
     void ProviderManifestTest::rejectInvalidJson() {

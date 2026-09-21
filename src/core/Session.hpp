@@ -87,6 +87,9 @@ namespace bb {
         [[nodiscard]] State state() const {
             return m_state;
         }
+        [[nodiscard]] qint64 createdAtMs() const {
+            return m_createdAtMs;
+        }
 
         // State transitions
         void setPrompt(const QString& prompt, bool echo = false, bool clearError = true);
@@ -104,6 +107,7 @@ namespace bb {
         QString                      m_id;
         Source                       m_source;
         Context                      m_context;
+        qint64                       m_createdAtMs{0};
         State                        m_state{State::Prompting};
         QString                      m_prompt;
         QString                      m_error;

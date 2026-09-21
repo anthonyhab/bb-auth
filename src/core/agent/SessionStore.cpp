@@ -65,6 +65,15 @@ namespace bb::agent {
         return event;
     }
 
+    QStringList SessionStore::expiredIds(qint64 nowMs, qint64 ttlMs) const {
+        QStringList expired;
+        for (const auto& [id, session] : m_sessions) {
+            if (nowMs - session->createdAtMs() > ttlMs)
+                expired.push_back(id);
+        }
+        return expired;
+    }
+
     Session* SessionStore::getSession(const QString& id) {
         auto it = m_sessions.find(id);
         return (it != m_sessions.end()) ? it->second.get() : nullptr;

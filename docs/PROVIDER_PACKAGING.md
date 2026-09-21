@@ -47,6 +47,7 @@ Install provider binary to:
   "priority": 20,
   "exec": "my-provider-binary",
   "autostart": true,
+  "resident": true,
   "capabilities": ["password", "cancel", "status"]
 }
 ```
@@ -56,6 +57,8 @@ Notes:
 - `id` must be unique across loaded manifests.
 - `exec` can be basename (resolved in `PATH`) or absolute path.
 - Higher `priority` wins active-provider selection.
+- `autostart` makes the provider eligible for launch at all; without it the built-in fallback serves sessions instead.
+- `resident` (default `true`) controls whether the daemon keeps the provider hot via eager launches (daemon startup, post-disconnect). Set `false` to launch only when a session pends — the provider should then exit when its session store drains, since nothing keeps it alive. Each launch is a fresh attestation, so non-resident providers are strictly stronger under the trust model at the cost of launch latency per prompt.
 
 ## Arch Packaging Example
 

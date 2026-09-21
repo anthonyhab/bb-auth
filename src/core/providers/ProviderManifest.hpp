@@ -16,6 +16,10 @@ namespace bb::providers {
         QStringList        args;
         QJsonObject        env;
         bool               autostart = true;
+        // Resident providers are kept hot by eager launches (daemon startup,
+        // post-disconnect). Non-resident providers still serve sessions but are
+        // only launched on demand — they exit when idle instead of staying hot.
+        bool               resident = true;
         QStringList        capabilities;
         QString            sourcePath;
 

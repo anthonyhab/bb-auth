@@ -1,8 +1,11 @@
 #include "Session.hpp"
 
+#include <QDateTime>
+
 namespace bb {
 
-    Session::Session(const QString& id, Source source, Context context) : m_id(id), m_source(source), m_context(std::move(context)) {}
+    Session::Session(const QString& id, Source source, Context context)
+        : m_id(id), m_source(source), m_context(std::move(context)), m_createdAtMs(QDateTime::currentMSecsSinceEpoch()) {}
 
     void Session::setPrompt(const QString& prompt, bool echo, bool clearError) {
         m_prompt = prompt;

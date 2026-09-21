@@ -8,14 +8,14 @@ The daemon owns the IPC socket, the session lifecycle, and every trust decision;
 
 - `CAgent` (`src/core/Agent.{hpp,cpp}`) — top-level orchestrator: binds the IPC server, tracks the active provider, eager/on-demand provider launches ([[omarchy-prompt#Resident eager launch]]), fails closed when no trusted provider exists.
 - `IpcServer` (`src/core/ipc/`) — `QLocalServer` with `UserAccessOption` (mode 0600): every peer is a same-UID process, which defines the adversary model in [[provider-trust#Provider trust model]].
-- `Session` (`src/core/Session.{hpp,cpp}`) + `agent/SessionStore` — a session is one pending secret request; `session.created`/`session.respond`/`session.cancel` flow over the socket per [[protocol#Provider IPC contract]].
+- `Session` (`src/core/Session.{hpp,cpp}`) + `agent/SessionStore` — a session is one pending secret request; `session.created`/`session.respond`/`session.cancel` flow over the socket per [[protocol#Provider IPC contract]]. Sessions carry a creation timestamp and expire after `SESSION_TTL_MS` (10 min) — the provider-maintenance timer sweeps them via `SessionStore::expiredIds` + `CAgent::closeSession` so an abandoned polkit/pinentry request cannot pin a prompt provider alive forever.
 - `agent/MessageRouter` / `agent/EventRouter` / `agent/EventQueue` — inbound provider messages vs. daemon→provider event delivery. Session events go only to the active provider, never broadcast ([[provider-trust#Event delivery boundary]]).
 
 ## Provider stack
 
 Everything under `src/core/providers/` plus the trust stores decides *which* UI may receive the secret; see [[provider-trust#Provider trust model]] for the model itself.
 
-- `ProviderDiscovery` + `ProviderManifest` — find and parse installed provider manifests (`autostart` flag, priority, launch command).
+- `ProviderDiscovery` + `ProviderManifest` — find and parse installed provider manifests (`autostart` flag, `resident` flag, priority, launch command).
 - `ProviderLauncher` (`src/core/providers/`) — spawns providers (`QProcess::startDetached`), records `{pid, start-time}` launch attestations.
 - `ProviderTrustStore` (`src/core/agent/`) — single-use attestation records matched at `ui.register`.
 - `ProviderRegistry` (`src/core/agent/`) — registered providers, active-provider selection, `isAuthorized` gate for `session.respond`.
