@@ -71,12 +71,12 @@ string.
 When the shim passes a command through unchanged (human invocation, or an agent
 command that cannot be rewritten — including `pkexec`, which already reaches the
 daemon), it MUST NOT emit a declaration, so it cannot clobber a real reason
-declared earlier by the `bb-auth-declare` CLI or a harness hook under the
+declared earlier by the `aisudo` CLI or a harness hook under the
 intent store's latest-wins rule.
 
 #### Scenario: pkexec passthrough preserves prior declaration
 
-- **WHEN** an agent runs `bb-auth-declare --reason "cleanup" -- pkexec rm /x`
+- **WHEN** an agent runs `aisudo -r "cleanup" -- pkexec rm /x`
   and the `pkexec` shim intercepts the exec'd `pkexec`
 - **THEN** the shim emits no declaration and the prompt shows the real reason
   "cleanup", not the generic shim reason
@@ -109,6 +109,6 @@ NOT alter the user's `PATH` automatically.
 
 #### Scenario: Documented activation
 
-- **WHEN** a user runs `bb-auth-declare --print-shim-dir`
+- **WHEN** a user runs `aisudo --print-shim-dir`
 - **THEN** the absolute shim directory path is printed for use in shell or
   session environment configuration

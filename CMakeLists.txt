@@ -175,10 +175,13 @@ set(BB_AUTH_SHIM_DIR "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-shims")
 # (e.g. libexec→bin is ../../bin from <libexec>/bb-auth-shims).
 file(RELATIVE_PATH BB_AUTH_SHIM_LINK_TARGET
      "/${CMAKE_INSTALL_LIBEXECDIR}/bb-auth-shims"
-     "/${CMAKE_INSTALL_BINDIR}/bb-auth-declare")
-configure_file(integrations/agent-cli/bb-auth-declare.in bb-auth-declare @ONLY)
-install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-declare
+     "/${CMAKE_INSTALL_BINDIR}/aisudo")
+configure_file(integrations/agent-cli/aisudo.in aisudo @ONLY)
+install(PROGRAMS ${CMAKE_BINARY_DIR}/aisudo
         DESTINATION ${CMAKE_INSTALL_BINDIR})
+# bb-auth-declare stays installed as the compatibility alias.
+install(PROGRAMS ${CMAKE_BINARY_DIR}/aisudo
+        DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME bb-auth-declare)
 
 install(CODE "
     if(\"${CMAKE_INSTALL_LIBEXECDIR}\" MATCHES \"^/\")
@@ -301,10 +304,10 @@ set_tests_properties(bb-auth-tests PROPERTIES
 # PATH-shim / declare CLI tests (python3; no extra deps)
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
-    add_test(NAME bb-auth-declare-shim
+    add_test(NAME aisudo-shim
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_declare_shim.py)
-    set_tests_properties(bb-auth-declare-shim PROPERTIES
-        ENVIRONMENT "BB_AUTH_DECLARE=${CMAKE_BINARY_DIR}/bb-auth-declare")
+    set_tests_properties(aisudo-shim PROPERTIES
+        ENVIRONMENT "AISUDO=${CMAKE_BINARY_DIR}/aisudo")
     add_test(NAME bb-auth-intent-hook
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_intent_hook.py)
     set_tests_properties(bb-auth-intent-hook PROPERTIES

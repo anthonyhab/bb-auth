@@ -120,7 +120,7 @@ Three channels, in order of reliability:
   shim dir in your shell profile so agent processes inherit it:
 
   ```bash
-  export PATH="$(bb-auth-declare --print-shim-dir):$PATH"
+  export PATH="$(aisudo --print-shim-dir):$PATH"
   ```
 
   Under an agent, `sudo CMD`/`doas CMD` are routed through the supervised polkit
@@ -132,8 +132,10 @@ Three channels, in order of reliability:
   carry the agent's real rationale to the prompt where the harness exposes a
   transcript or session state.
 
-- **Skill / manual:** agents can wrap commands directly:
-  `bb-auth-declare --reason "why" -- sudo CMD`.
+- **Skill / manual:** agents wrap commands directly — `aisudo [-r "why"] [--]
+  sudo CMD`, or bare `aisudo CMD` (the name is the verb). Structured input via
+  `aisudo --json '{"argv": [...], "reason": "…"}'`; `aisudo --help` carries the
+  full grammar. `bb-auth-declare` remains as a compatibility alias.
 
 Residual limits: absolute-path invocations (`/usr/bin/sudo`) bypass PATH shims;
 attribution is display/audit only and never gates the allow/deny decision.

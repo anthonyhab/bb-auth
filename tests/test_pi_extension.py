@@ -102,6 +102,19 @@ class PiExtensionCase(unittest.TestCase):
         self.assertEqual(d["agent"], "pi")
         self.assertEqual(d["channel"], "hook")
 
+    def test_sudo_n_rewrites(self):
+        proc = self.invoke("sudo -n make install")
+        self.assertEqual(json.loads(proc.stdout)["command"], "pkexec make install")
+
+    def test_sudo_user_flag_maps(self):
+        proc = self.invoke("sudo -u nobody id")
+        self.assertEqual(json.loads(proc.stdout)["command"], "pkexec --user nobody id")
+
+    def test_unsupported_option_declares_but_no_rewrite(self):
+        proc = self.invoke("sudo -E id")
+        self.assertEqual(json.loads(proc.stdout)["command"], "sudo -E id")
+        self.assertEqual(len(self.daemon.payloads), 1)
+
     def test_non_bash_tool_untouched(self):
         proc = self.invoke("sudo x", tool="edit")
         self.assertEqual(proc.returncode, 0, proc.stderr)

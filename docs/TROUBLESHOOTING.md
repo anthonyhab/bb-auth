@@ -72,7 +72,7 @@ If agent-initiated `sudo` reaches PAM directly, bb-auth never sees it — check
 whether the shim dir is on the agent's PATH:
 
 ```bash
-bb-auth-declare --print-shim-dir        # e.g. /usr/libexec/bb-auth-shims
+aisudo --print-shim-dir                 # e.g. /usr/libexec/bb-auth-shims
 echo "$PATH" | tr ':' '\n' | grep shims # inside the agent's shell
 ```
 

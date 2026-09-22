@@ -207,6 +207,40 @@ class HookCase(unittest.TestCase):
         self.assertEqual(len(self.declared()), 1)
         self.assertEqual(self.declared()[0]["command"], "sudo -i")
 
+    def test_sudo_n_rewrites(self):
+        # Shared aisudo subset: -n drops — the supervised GUI prompt is the
+        # non-interactive path.
+        proc = self.invoke({
+            "tool_name": "Bash",
+            "tool_input": {"command": "sudo -n make install"},
+        })
+        self.assertEqual(proc.returncode, 0)
+        out = json.loads(proc.stdout)
+        self.assertEqual(
+            out["hookSpecificOutput"]["updatedInput"]["command"],
+            "pkexec make install")
+        self.assertEqual(self.declared()[0]["command"], "pkexec make install")
+
+    def test_sudo_user_flag_maps_to_pkexec(self):
+        proc = self.invoke({
+            "tool_name": "Bash",
+            "tool_input": {"command": "sudo -u nobody id"},
+        })
+        self.assertEqual(proc.returncode, 0)
+        out = json.loads(proc.stdout)
+        self.assertEqual(
+            out["hookSpecificOutput"]["updatedInput"]["command"],
+            "pkexec --user nobody id")
+
+    def test_probe_only_sudo_declares_without_rewrite(self):
+        proc = self.invoke({
+            "tool_name": "Bash",
+            "tool_input": {"command": "sudo -nv"},
+        })
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "")
+        self.assertEqual(self.declared()[0]["command"], "sudo -nv")
+
     def test_malformed_input_fails_open(self):
         proc = subprocess.run([HOOK], input="not json{", env=self.env,
                               capture_output=True, text=True, timeout=15)

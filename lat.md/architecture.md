@@ -33,6 +33,6 @@ Everything under `src/core/providers/` plus the trust stores decides *which* UI 
 
 ## Agent integrations
 
-`integrations/` holds agent-facing glue that is **not** core: the multi-harness `bb-auth-intent-hook` (`integrations/hooks/`), `bb-auth-declare` (`integrations/agent-cli/`) as voluntary CLI + PATH shim, and the opencode plugin ([[agent-intent#Agent intent surfacing]]).
+`integrations/` holds agent-facing glue that is **not** core: the multi-harness `bb-auth-intent-hook` (`integrations/hooks/`), `aisudo`/`bb-auth-declare` (`integrations/agent-cli/`) as voluntary CLI + PATH shim, and the opencode plugin ([[agent-intent#Agent intent surfacing]]).
 
-`bb-auth-intent-hook` auto-detects Claude Code `PreToolUse`, Devin, and Gemini `BeforeTool` payloads, declares intent, and rewrites clean `sudo` → `pkexec`. `bb-auth-declare` is installed as `sudo`/`doas`/`pkexec` shim symlinks that pass through for humans and declare + rewrite for agents. The opencode plugin hooks `tool.execute.before` for the same effect.
+`bb-auth-intent-hook` auto-detects Claude Code `PreToolUse`, Devin, and Gemini `BeforeTool` payloads, declares intent, and rewrites clean `sudo` → `pkexec`. The `aisudo`/`bb-auth-declare` script is installed as `sudo`/`doas`/`pkexec` shim symlinks that pass through for humans and declare + translate for agents. The opencode plugin hooks `tool.execute.before` for the same effect.

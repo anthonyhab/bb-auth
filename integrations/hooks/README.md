@@ -29,9 +29,12 @@ deliberately conservative — only a clean leading `sudo CMD` with no options,
 env assignments, or shell metacharacters is rewritten, and **only when the
 daemon acknowledges** the declaration: with no supervised agent running,
 `pkexec` could hard-fail where `sudo` would have worked, so a dead daemon means
-the command runs on its original auth path. Anything compound or option-bearing
-runs unchanged (still with intent declared), because pkexec's flags and minimal
-environment differ from sudo's.
+the command runs on its original auth path. The rewrite shares the `aisudo`
+option subset — `-n`/`--non-interactive` drops, `-u`/`--user` maps to
+`pkexec --user`, `--` ends options — while other options, env assignments,
+compound commands, and probe-only invocations run unchanged (still with
+intent declared), because pkexec's flags and minimal environment differ from
+sudo's.
 
 On Claude-format harnesses the rewrite envelope carries
 `permissionDecision: "allow"` — required for the harness to merge the updated
@@ -191,8 +194,9 @@ daemon sees.
 
 ### Others (aider, cursor-agent, …)
 
-No hook format — use the PATH shims (`bb-auth-declare --print-shim-dir`, see
-README → Agent Supervision) or the voluntary `bb-auth-declare` CLI.
+No hook format — use the PATH shims (`aisudo --print-shim-dir`, see
+README → Agent Supervision) or the voluntary `aisudo` CLI
+(`bb-auth-declare` remains a compatibility alias).
 
 ## Verify
 

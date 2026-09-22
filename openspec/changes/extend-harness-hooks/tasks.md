@@ -13,7 +13,7 @@
 - [x] 2.1 `integrations/pi/bb-auth-extension.ts`: `tool_call` handler — declare
   + in-place `event.input.command` rewrite gated on daemon `ok`; fail-open.
 - [x] 2.2 Add `pi-coding-agent` segment signature to daemon detector
-  (`RequestContext.cpp`) and shim (`bb-auth-declare.in`); NOT bare `pi`.
+  (`RequestContext.cpp`) and shim (`aisudo.in`); NOT bare `pi`.
 
 ## 3. Docs
 

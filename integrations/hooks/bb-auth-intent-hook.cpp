@@ -184,14 +184,16 @@ namespace {
         return ok;
     }
 
-    // True only for a clean, simple leading `sudo` command — no options, no env
-    // assignments, no shell metacharacters. We deliberately decline anything
-    // compound or option-bearing: pkexec's flags and minimal environment differ
-    // from sudo's, so rewriting those could change behaviour. They still get intent
-    // declared; they just run unchanged.
+    // Rewrites a leading `sudo`/`doas` command into `pkexec`, sharing the
+    // aisudo CLI/shim option subset: `-n`/`--non-interactive` drops (the
+    // supervised GUI prompt is the non-interactive path), `-u`/`--user` maps
+    // to `pkexec --user`, `--` ends options. Other options, env assignments,
+    // shell metacharacters, and probe-only invocations decline — they still
+    // get intent declared; they just run unchanged.
     // @lat: [[agent-intent#sudo to pkexec rewrite]]
     bool simpleSudoRewrite(const QString &command, QString *rewritten) {
         static const QRegularExpression meta(QStringLiteral("[|&;<>`$()\\n]"));
+        static const QRegularExpression leadTok(QStringLiteral("^(\\S+)\\s*"));
         const QString trimmed = command.trimmed();
         const bool    isSudo  = trimmed.startsWith(QStringLiteral("sudo "));
         const bool    isDoas  = trimmed.startsWith(QStringLiteral("doas "));
@@ -199,12 +201,52 @@ namespace {
             return false;
         if (meta.match(trimmed).hasMatch())
             return false;
-        const QString rest = trimmed.mid(trimmed.indexOf(QLatin1Char(' '))).trimmed();
-        if (rest.isEmpty() || rest.startsWith(QLatin1Char('-')))
-            return false; // options (-i, -u, -E, ...) don't translate cleanly
-        if (rest.section(QLatin1Char(' '), 0, 0).contains(QLatin1Char('=')))
-            return false; // `VAR=x cmd` env assignment is sudo/doas-specific
-        *rewritten = QStringLiteral("pkexec ") + rest;
+        QString rest = trimmed.mid(trimmed.indexOf(QLatin1Char(' '))).trimmed();
+        QString user;
+        for (;;) {
+            const auto m = leadTok.match(rest);
+            if (!m.hasMatch())
+                return false; // probe / options with no command
+            const QString tok = m.captured(1);
+            if (tok == QLatin1String("--")) {
+                rest = rest.mid(m.capturedLength());
+                break;
+            }
+            if (tok == QLatin1String("-n") ||
+                tok == QLatin1String("--non-interactive")) {
+                rest = rest.mid(m.capturedLength());
+                continue;
+            }
+            if (tok == QLatin1String("-u") || tok == QLatin1String("--user")) {
+                rest = rest.mid(m.capturedLength());
+                const auto v = leadTok.match(rest);
+                if (!v.hasMatch())
+                    return false; // missing user argument
+                user = v.captured(1);
+                rest = rest.mid(v.capturedLength());
+                continue;
+            }
+            if (tok.startsWith(QStringLiteral("--user="))) {
+                user = tok.mid(7);
+                rest = rest.mid(m.capturedLength());
+                continue;
+            }
+            if (tok.startsWith(QStringLiteral("-u")) && tok.size() > 2) {
+                user = tok.mid(2);
+                rest = rest.mid(m.capturedLength());
+                continue;
+            }
+            if (tok.startsWith(QLatin1Char('-')) ||
+                tok.contains(QLatin1Char('=')))
+                return false; // unsupported option / env assignment
+            break;            // first non-option token: command begins
+        }
+        if (rest.isEmpty())
+            return false;
+        *rewritten = QStringLiteral("pkexec") +
+            (user.isEmpty() ? QString()
+                            : QStringLiteral(" --user ") + user) +
+            QStringLiteral(" ") + rest;
         return true;
     }
 

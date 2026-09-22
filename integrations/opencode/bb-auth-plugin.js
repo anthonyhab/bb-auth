@@ -2,7 +2,7 @@
 // `bash` tool's tool.execute.before hook. Display/audit only, fail-open.
 //
 // Install: copy or symlink into ~/.config/opencode/plugins/ (global) or
-// .opencode/plugins/ (project). The PATH shim (bb-auth-declare) remains the
+// .opencode/plugins/ (project). The PATH shim (aisudo) remains the
 // fallback for command shapes this hook misses.
 //
 // Note: some opencode versions had a bug where output.args mutations did not
@@ -16,16 +16,39 @@ import { connect } from "node:net"
 const PRIVILEGED = /^\s*(sudo|pkexec|doas)\b/
 const TTL_MS = 20000
 
-// Same conservative rule as the C++ hook / python shim: only a clean leading
-// `sudo CMD` — no options, env assignments, or shell metacharacters.
+// Shares the aisudo CLI/shim option subset: -n/--non-interactive drops (the
+// supervised GUI prompt is the non-interactive path), -u/--user maps to
+// `pkexec --user`, `--` ends options. Other options, env assignments, shell
+// metacharacters, and probe-only invocations decline.
 function rewriteSudo(command) {
   const trimmed = command.trim()
   if (!trimmed.startsWith("sudo ") && !trimmed.startsWith("doas ")) return null
   if (/[|&;<>`$()\n]/.test(trimmed)) return null
-  const rest = trimmed.slice(trimmed.indexOf(" ")).trim()
-  if (!rest || rest.startsWith("-")) return null
-  if (/^[^ ]*=[^ ]*/.test(rest.split(" ")[0])) return null
-  return "pkexec " + rest
+  let rest = trimmed.slice(trimmed.indexOf(" ")).trim()
+  let user = null
+  for (;;) {
+    const m = /^(\S+)\s*/.exec(rest)
+    if (!m) return null // probe / options with no command
+    const tok = m[1]
+    if (tok === "--") { rest = rest.slice(m[0].length); break }
+    if (tok === "-n" || tok === "--non-interactive") {
+      rest = rest.slice(m[0].length); continue
+    }
+    if (tok === "-u" || tok === "--user") {
+      rest = rest.slice(m[0].length)
+      const v = /^(\S+)\s*/.exec(rest)
+      if (!v) return null // missing user argument
+      user = v[1]
+      rest = rest.slice(v[0].length)
+      continue
+    }
+    if (tok.startsWith("--user=")) { user = tok.slice(7); rest = rest.slice(m[0].length); continue }
+    if (tok.startsWith("-u") && tok.length > 2) { user = tok.slice(2); rest = rest.slice(m[0].length); continue }
+    if (tok.startsWith("-") || tok.includes("=")) return null
+    break // first non-option token: command begins
+  }
+  if (!rest) return null
+  return "pkexec" + (user ? " --user " + user : "") + " " + rest
 }
 
 // Declare intent over the bb-auth socket and resolve true only when the daemon

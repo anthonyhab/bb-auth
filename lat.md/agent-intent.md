@@ -30,25 +30,34 @@ An AI agent's `sudo`/`pkexec` escalation used to look identical to the user's ow
 
 ## Agent CLI channel
 
-`bb-auth-declare` (`integrations/agent-cli/`) is the voluntary channel for harnesses without a hook: the agent runs `bb-auth-declare --reason … -- CMD`, which declares intent, rewrites a clean leading `sudo` to `pkexec`, and execs the command.
+`aisudo` (`integrations/agent-cli/`, also installed as compatibility alias `bb-auth-declare`) is the voluntary channel for harnesses without a hook: the agent runs `aisudo CMD`, which declares intent, applies the shared [[agent-intent#Escalation translation]] rules, and execs the command.
 
+- The name is the verb: a bare `aisudo CMD` normalizes to `sudo CMD`; an explicit `sudo`/`doas`/`pkexec` launcher inside the command is accepted and absorbed. `-r`/`--reason` is optional and defaults to the command string; `--json` takes a structured object (inline or `-` on stdin); `--dry-run` prints the resolved plan without daemon contact or exec.
 - Agent identity is auto-detected by walking PPID ancestry (`_detect_agent`), same signature family as the daemon's resolver.
-- Fails open like the hook: declaration failure or an unbound (non-agent) declarer leaves the command unchanged — and the `sudo`→`pkexec` rewrite only happens when the declaration actually bound.
+- Fails open like the hook: declaration failure or an unreachable daemon leaves the command unchanged — translation applies whenever the daemon *answers* (`bound` true or false), matching the shim's rule.
 
 ## PATH shim channel
 
-`bb-auth-declare` doubles as `sudo`/`doas`/`pkexec` via argv0 dispatch, installed as symlinks under `<libexec>/bb-auth-shims/` — the environmental channel that needs no agent cooperation at all, just a PATH prepend.
+`aisudo` doubles as `sudo`/`doas`/`pkexec` via argv0 dispatch, installed as symlinks under `<libexec>/bb-auth-shims/` — the environmental channel that needs no agent cooperation at all, just a PATH prepend.
 
-- Activation gates on the same ancestry detection: under a recognized agent it declares a fixed generic reason (`channel="shim"`, argv only in the audit-only `command` field) and rewrites clean `sudo CMD`/`doas CMD` to `pkexec CMD`; under humans it execs the real binary verbatim (PATH scan skipping self).
+- Activation gates on the same ancestry detection: under a recognized agent it declares a fixed generic reason (`channel="shim"`, argv only in the audit-only `command` field) and applies the [[agent-intent#Escalation translation]] rules to `sudo CMD`/`doas CMD`; under humans it execs the real binary verbatim (PATH scan skipping self).
 - Passthrough never declares — latest-wins correlation means a passthrough declare would clobber a real reason set moments earlier by the CLI/hook.
 - Daemon unreachable → passthrough rather than rewrite: a dead daemon would leave pkexec with no agent to authorize against, so keeping `sudo` on its own path beats forced supervision.
 - Residual limits: absolute-path calls and non-PATH exec bypass it; it is supervision UX, not a security boundary.
+
+## Escalation translation
+
+`_translate` (`aisudo.in`) is the shared `sudo`/`doas` → `pkexec` translator used by both the CLI and the PATH shim; it returns the rewritten argv or a decline reason.
+
+- Supported option subset: `-n`/`--non-interactive` drops (the supervised GUI prompt *is* the non-interactive path — `sudo -n CMD` previously failed guaranteed under agents), `-u`/`--user` maps to `pkexec --user`, `--` is consumed.
+- Everything else declines — other options, `VAR=val` env assignments, shell metacharacters in any argument, and probe-only invocations (options but no command, e.g. `sudo -nv`) — running via the original launcher unchanged.
+- The CLI surfaces the translation or decline reason on stderr; the shim stays silent (passthrough must not leak noise into agent transcripts).
 
 ## sudo to pkexec rewrite
 
 The hook rewrites a *clean leading* `sudo CMD`/`doas CMD` into `pkexec CMD` via the harness's input-merge channel, routing the escalation through bb-auth's supervised, attributed polkit prompt.
 
-- Deliberately narrow: declines sudo options (`-i`, `-u`, …), env assignments, and shell metacharacters (`|`, `&&`, `;`, redirects, subshells, substitution) — pkexec's flags and minimal env differ from sudo's and mis-rewriting could change behaviour.
+- Shares the [[agent-intent#Escalation translation]] subset: `-n`/`--non-interactive` drops, `-u`/`--user` maps to `pkexec --user`, `--` ends options; other options, env assignments, and shell metacharacters (`|`, `&&`, `;`, redirects, subshells, substitution) decline — pkexec's flags and minimal env differ from sudo's and mis-rewriting could change behaviour.
 - Declined commands run unchanged, still with intent declared; the rewrite is surfaced via `permissionDecisionReason`, never silent.
 
 ## Attribution band
