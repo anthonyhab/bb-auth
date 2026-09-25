@@ -17,6 +17,8 @@ import tempfile
 import threading
 import unittest
 
+FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "fixtures", "escalation-translation.json")
 EXT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                    "..", "integrations", "pi", "bb-auth-extension.ts")
 
@@ -131,6 +133,14 @@ class PiExtensionCase(unittest.TestCase):
         self.assertEqual(json.loads(proc.stdout)["command"],
                          "sudo apt update && sudo apt upgrade")
         self.assertEqual(len(self.daemon.payloads), 1)
+
+    def test_shared_translation_vectors(self):
+        with open(FIXTURE) as f:
+            rows = json.load(f)["rows"]
+        for row in rows:
+            with self.subTest(command=row["command"]):
+                got = json.loads(self.invoke(row["command"]).stdout)["command"]
+                self.assertEqual(got, row["rewrite"] or row["command"])
 
     def test_daemon_down_no_rewrite(self):
         self.daemon.stop()

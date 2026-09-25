@@ -20,7 +20,7 @@ makedepends=(
 optdepends=(
     'fprintd: Fingerprint authentication support'
     'libfido2: FIDO2 device support'
-    'python: agent intent declaration (aisudo) and PATH shims'
+    'python: aisudo, PATH shims, and the bb-auth-agents harness installer'
 )
 provides=('bb-auth')
 conflicts=('bb-auth')

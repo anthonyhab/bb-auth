@@ -1,6 +1,6 @@
 # bb-auth Plan
 
-Last updated: 2026-02-18
+Last updated: 2026-09-25
 Owner branch: `main`
 
 ## Vision
@@ -132,6 +132,27 @@ Exit criteria:
 
 - Every release is reproducible and has a documented verification trail.
 
+## Phase 6: Agent Supervision Handoff
+
+Goal: agent escalations become a visible human handoff — attributed, routed
+through the supervised prompt, and wired by default rather than by hand.
+
+Tasks:
+
+- [x] Intent declaration + attribution band (ADR 0003, `lat.md/agent-intent.md`).
+- [x] Harness hooks for Claude Code, Codex, Devin, Gemini; opencode/pi plugins; PATH shims; `aisudo`.
+- [x] Challenge-gated harness "allow": rewrite only when polkit will prompt (`pkcheck`).
+- [x] Handoff context for the model + Claude Code post-run annotation (`classifierContext`, 126/127 decline guidance).
+- [x] `bb-auth-agents` installer (status/install/uninstall) incl. Claude `autoMode` entries.
+- [x] Shared translation vectors across all four translators.
+- [ ] Keyboard-path validation of the attribution band on a live prompt.
+- [ ] Release: bump version, AUR package ships `bb-auth-agents`.
+
+Exit criteria:
+
+- `bb-auth-agents status` shows every installed harness wired on a fresh install.
+- No harness receives an "allow" for a command polkit would not challenge.
+
 ## Quality Bar
 
 Functional:
@@ -200,3 +221,4 @@ Do not:
 - 2026-02-18: Added golden-snapshot prompt regression tests (`test_prompt_snapshots.cpp`) covering the complete display model per canonical scenario (polkit run/generic, agent declared/undeclared, keyring, pinentry OpenPGP, fingerprint).
 - 2026-02-18: Added `docs/COMPATIBILITY.md` — core↔IPC matrix, migration notes per protocol bump, and a release checklist.
 - 2026-09-17: Extended harness hook coverage to Codex CLI (`turn_id`-detected `PreToolUse`, `updatedInput` envelope) and pi (`tool_call` extension mutating `event.input`); added `pi-coding-agent` signature to both detectors; verified opencode plugin contract against current docs (anomalyco/opencode#31680 caveat retained).
+- 2026-09-25: Agent handoff (openspec `agent-handoff`): pkcheck-gated rewrite/allow, `additionalContext` + Claude post-run annotation, `bb-auth-agents` installer, shared translation fixture, dropped `bb-auth-declare` alias.

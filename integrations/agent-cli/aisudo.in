@@ -4,7 +4,6 @@
 Usage:
   aisudo [-r|--reason TEXT] [--agent NAME] [--json JSON|-] [--dry-run] [--] [LAUNCHER] CMD...
   aisudo --print-shim-dir
-  bb-auth-declare ...        (compatibility name, identical grammar)
 
 LAUNCHER (sudo/doas/pkexec) is optional: a bare `aisudo CMD` is treated as
 `aisudo sudo CMD`. If a command is given it is exec'd after declaring; a clean

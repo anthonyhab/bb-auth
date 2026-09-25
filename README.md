@@ -109,37 +109,54 @@ More troubleshooting:
 ## Agent Supervision (AI agents)
 
 When an AI agent (Claude Code, Codex, Gemini CLI, opencode, pi, Devin, …) runs
-a privileged command, bb-auth shows **who** is asking and — when declared —
-**why**, with an "AI agent" badge on the prompt.
+a privileged command, bb-auth shows **who** is asking and **why**, with an
+"AI agent" badge on the prompt — and the agent's `sudo` becomes a handoff: the
+harness steps aside and *you* approve the escalation at the bb-auth prompt.
 
-Three channels, in order of reliability:
+Wire every harness you have installed:
 
-- **PATH shims (zero cooperation):** `sudo`/`doas`/`pkexec` shims install inertly
-  to `<libexec>/bb-auth-shims/`. They activate only under a recognized agent
-  ancestor — a human's `sudo` passes through untouched. To enable, prepend the
-  shim dir in your shell profile so agent processes inherit it:
+```bash
+bb-auth-agents install     # idempotent; backs up each config it edits
+bb-auth-agents status      # per-harness wiring + hook, daemon, and polkit state
+bb-auth-agents uninstall   # removes only bb-auth's entries
+```
+
+Restart agent sessions afterwards (Codex: trust the hook via `/hooks`).
+
+What the hooks do, per privileged tool call:
+
+- **Declare** who + why to the daemon. The reason is the agent's last message
+  where the harness exposes a transcript (Claude Code, Codex, Devin, pi).
+- **Hand off**: a clean `sudo CMD`/`doas CMD` is rewritten to `pkexec CMD` and
+  approved at the harness level — but **only when polkit will prompt you**
+  (`pkcheck` says a challenge is required). If a polkit rule would authorize
+  pkexec silently, the command stays on the harness's own permission path.
+- **Tell the agent** a human owns the decision, and (Claude Code) annotate the
+  result for the auto mode classifier; a dismissed prompt (exit 126) is
+  reported as "the user declined — don't route around it".
+
+For Claude Code, `install` also adds two `bb-auth:` entries to `autoMode`
+(`environment` and `soft_deny`, keeping `$defaults`) so the classifier treats
+workarounds after a declined prompt as going around you.
+
+Hookless agents (aider, cursor-agent, …) use one of:
+
+- **PATH shims (zero cooperation):** `sudo`/`doas`/`pkexec` shims in
+  `<libexec>/bb-auth-shims/` activate only under a recognized agent ancestor —
+  a human's `sudo` passes through untouched:
 
   ```bash
   export PATH="$(aisudo --print-shim-dir):$PATH"
   ```
 
-  Under an agent, `sudo CMD`/`doas CMD` are routed through the supervised polkit
-  prompt even if the agent never declared anything.
-
-- **Harness hooks:** a compiled `PreToolUse`/`BeforeTool` hook
-  (`integrations/hooks/`) covers Claude Code, Codex CLI, Devin, and Gemini CLI;
-  opencode and pi get a native plugin/extension (`integrations/`). These can
-  carry the agent's real rationale to the prompt where the harness exposes a
-  transcript or session state.
-
-- **Skill / manual:** agents wrap commands directly — `aisudo [-r "why"] [--]
-  sudo CMD`, or bare `aisudo CMD` (the name is the verb). Structured input via
-  `aisudo --json '{"argv": [...], "reason": "…"}'`; `aisudo --help` carries the
-  full grammar. `bb-auth-declare` remains as a compatibility alias.
+- **`aisudo` (voluntary):** `aisudo [-r "why"] [--] sudo CMD`, or bare
+  `aisudo CMD`. `aisudo --help` carries the full grammar (`--json`,
+  `--dry-run`).
 
 Residual limits: absolute-path invocations (`/usr/bin/sudo`) bypass PATH shims;
 attribution is display/audit only and never gates the allow/deny decision.
-Requires `python3` for the declare/shim tooling (Arch: `python` optdepend).
+Requires `python3` for `aisudo`/`bb-auth-agents` (Arch: `python` optdepend).
+Details: `integrations/hooks/README.md`.
 
 ## Provider Model (Advanced)
 

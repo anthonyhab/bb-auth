@@ -38,9 +38,27 @@ sudo's.
 
 On Claude-format harnesses the rewrite envelope carries
 `permissionDecision: "allow"` — required for the harness to merge the updated
-input. That "allow" only skips the *harness's own* permission prompt for the
-rewritten call; the escalation is still gated by polkit at the bb-auth prompt.
-It never approves the original `sudo` — the tool input is replaced.
+input. That "allow" skips the *harness's own* permission prompt (and Claude
+Code's auto mode classifier) for the rewritten call, handing the decision to
+the human at the bb-auth prompt. It never approves the original `sudo` — the
+tool input is replaced.
+
+Because "allow" removes the harness gate, the hook first runs `pkcheck
+--action-id org.freedesktop.policykit.exec` (no interaction, ~3 ms) and
+rewrites **only when polkit reports that it will challenge the user** (exit 2).
+If a polkit rule would authorize pkexec silently (e.g. systemd's
+`empower.rules`, a "wheel = YES" rule), or pkcheck is missing or fails, the
+command stays on the harness's own permission path. Residual: unprivileged
+callers cannot pass pkexec's `program` detail to pkcheck, so a rule that says
+YES only for specific programs is not modeled.
+
+The rewrite also carries `additionalContext` telling the model that a human
+approves at the GUI prompt and that exit 126/127 means "declined — don't route
+around it". For Claude Code, the same binary handles `PostToolUse` (a
+`classifierContext` note for auto mode: authorized after authentication, or
+without a prompt) and `PostToolUseFailure` (pkexec exit 126/127 →
+`additionalContext`). Post events never declare intent and never relay tool
+output.
 
 The daemon correlates a declaration to the polkit request by **shared agent
 process ancestry** (pid *and* start-time, so a recycled pid fails closed) — not
@@ -49,11 +67,27 @@ resolved one, the prompt shows a mismatch warning. The hook never sends the
 agent's command as authoritative: what is actually authorized stays with
 polkit's own message.
 
-## Per-harness setup
+## Setup
+
+```bash
+bb-auth-agents install          # every detected harness
+bb-auth-agents install claude   # or name them
+bb-auth-agents status
+```
+
+The installer edits each harness's config idempotently (first edit saves
+`<file>.bb-auth-backup`), touches only entries whose hook command is
+`bb-auth-intent-hook` (plus Claude `autoMode` strings prefixed `bb-auth:`), and
+symlinks the opencode plugin / pi extension so upgrades propagate. `status`
+also reports the hook version, daemon reachability, and whether polkit will
+prompt (i.e. whether rewrites are active). The manual snippets below are what
+it writes.
+
+## Per-harness setup (manual)
 
 The hook binary lives at `<libexec>/bb-auth-intent-hook` (e.g.
-`/usr/libexec/bb-auth-intent-hook`). Hooks are read at session start — restart
-the agent after editing.
+`/usr/libexec/bb-auth-intent-hook`; `--version` prints its build). Hooks are
+read at session start — restart the agent after editing.
 
 ### Claude Code
 
@@ -71,10 +105,24 @@ actually escalating privilege (`~/.claude/settings.json`):
           { "type": "command", "if": "Bash(pkexec *)", "command": "/usr/libexec/bb-auth-intent-hook" },
           { "type": "command", "if": "Bash(doas *)",   "command": "/usr/libexec/bb-auth-intent-hook" }
         ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Bash",
+        "hooks": [ { "type": "command", "if": "Bash(pkexec *)", "command": "/usr/libexec/bb-auth-intent-hook" } ] }
+    ],
+    "PostToolUseFailure": [
+      { "matcher": "Bash",
+        "hooks": [ { "type": "command", "if": "Bash(pkexec *)", "command": "/usr/libexec/bb-auth-intent-hook" } ] }
     ]
   }
 }
 ```
+
+`bb-auth-agents install claude` additionally appends a `bb-auth:` entry to
+`autoMode.environment` (how escalation is supervised here) and
+`autoMode.soft_deny` (retrying via `sudo -S`/askpass/`su`/`run0`/sudoers edits
+after a declined prompt), creating either list with `"$defaults"` first so the
+built-in rules stay in effect.
 
 Claude Code provides `transcript_path`, so the prompt gets the agent's real
 rationale.
@@ -157,9 +205,7 @@ opencode has a plugin API instead of hook commands. Install the plugin into
 `~/.config/opencode/plugins/` (or the project's `.opencode/plugin/`):
 
 ```bash
-mkdir -p ~/.config/opencode/plugins
-cp /usr/share/bb-auth/integrations/opencode/bb-auth-plugin.js \
-   ~/.config/opencode/plugins/
+bb-auth-agents install opencode   # symlinks the packaged plugin
 ```
 
 The plugin hooks `tool.execute.before` on the `bash` tool: it declares intent
@@ -176,9 +222,7 @@ extension into `~/.pi/agent/extensions/` (global) or `.pi/extensions/`
 (project-local), then `/reload`:
 
 ```bash
-mkdir -p ~/.pi/agent/extensions
-cp /usr/share/bb-auth/integrations/pi/bb-auth-extension.ts \
-   ~/.pi/agent/extensions/
+bb-auth-agents install pi   # symlinks the packaged extension
 ```
 
 The extension hooks `tool_call` on the `bash` tool: it declares intent
@@ -195,8 +239,7 @@ daemon sees.
 ### Others (aider, cursor-agent, …)
 
 No hook format — use the PATH shims (`aisudo --print-shim-dir`, see
-README → Agent Supervision) or the voluntary `aisudo` CLI
-(`bb-auth-declare` remains a compatibility alias).
+README → Agent Supervision) or the voluntary `aisudo` CLI.
 
 ## Verify
 

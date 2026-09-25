@@ -1,0 +1,32 @@
+{
+  "_comment": "Shared sudo/doas -> pkexec translation vectors. Every translator (bb-auth-intent-hook, aisudo _translate, pi extension, opencode plugin) is tested against these rows; rewrite null means the command must run unchanged. See lat.md/agent-intent.md#Escalation translation.",
+  "rows": [
+    {"command": "sudo pacman -Syu", "rewrite": "pkexec pacman -Syu"},
+    {"command": "doas id", "rewrite": "pkexec id"},
+    {"command": "  sudo ls", "rewrite": "pkexec ls"},
+    {"command": "sudo -n make install", "rewrite": "pkexec make install"},
+    {"command": "sudo --non-interactive true", "rewrite": "pkexec true"},
+    {"command": "sudo -u nobody id", "rewrite": "pkexec --user nobody id"},
+    {"command": "sudo -unobody id", "rewrite": "pkexec --user nobody id"},
+    {"command": "sudo --user=nobody id", "rewrite": "pkexec --user nobody id"},
+    {"command": "sudo -- id", "rewrite": "pkexec id"},
+    {"command": "sudo -n -u nobody id", "rewrite": "pkexec --user nobody id"},
+    {"command": "sudo cmd -n x", "rewrite": "pkexec cmd -n x"},
+    {"command": "sudo echo 'a b'", "rewrite": "pkexec echo 'a b'"},
+    {"command": "sudo", "rewrite": null},
+    {"command": "sudo -n", "rewrite": null},
+    {"command": "sudo -nv", "rewrite": null},
+    {"command": "sudo -E id", "rewrite": null},
+    {"command": "sudo -i", "rewrite": null},
+    {"command": "sudo FOO=1 id", "rewrite": null},
+    {"command": "sudo -u", "rewrite": null},
+    {"command": "sudo -u 'bad;user' id", "rewrite": null},
+    {"command": "pkexec id", "rewrite": null},
+    {"command": "sudo sh -c 'a|b'", "rewrite": null},
+    {"command": "sudo x && y", "rewrite": null},
+    {"command": "sudo $(whoami)", "rewrite": null},
+    {"command": "sudo cmd `id`", "rewrite": null},
+    {"command": "sudo cmd >out", "rewrite": null},
+    {"command": "sudo apt update; sudo apt upgrade", "rewrite": null}
+  ]
+}

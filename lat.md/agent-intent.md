@@ -21,20 +21,53 @@ An AI agent's `sudo`/`pkexec` escalation used to look identical to the user's ow
 
 - Coverage: Claude/Devin/Codex via `PreToolUse` (`Bash`/`exec`/`exec_command`), Gemini via `BeforeTool` (`run_shell_command`). opencode and pi get a native plugin/extension instead (same declare + rewrite contract); hookless harnesses keep the PATH shim.
 - Harness is auto-detected from the payload: codex reuses Claude's `tool_name` shape but adds a `turn_id` discriminator (unified exec may surface as `exec_command`/`matcher_aliases: ["Bash"]`); others key on `tool_name` (`Bash`/`exec`/`run_shell_command`). The rewrite envelope differs per harness (`updatedInput` merge — codex requires `permissionDecision: "allow"` beside it — vs Gemini's `hookSpecificOutput.tool_input`). Unknown tools still declare but never rewrite.
-- The rewrite is **gated on a daemon `ok` reply** — an unreachable daemon leaves the command on its original auth path, since `pkexec` with no supervising agent can hard-fail where `sudo` would have worked.
+- The rewrite is **gated on a daemon `ok` reply** — an unreachable daemon leaves the command on its original auth path, since `pkexec` with no supervising agent can hard-fail where `sudo` would have worked — and on a polkit challenge ([[agent-intent#Challenge-gated approval]]).
 - Declaration triggers only on a privileged *leading* token — `cat sudo.conf` must not clobber a real pending reason under latest-wins correlation.
 - Claude Code's matcher is **`if`-gated** (`if: "Bash(sudo *)"`/`pkexec`/`doas` permission-rule syntax) so the process spawns only on actual escalations; Devin/Gemini matchers are tool-name regexes, so the hook self-filters privileged prefixes in ~1 ms. This is the load-bearing performance decision.
 - A real rationale reaches the prompt only when the harness exposes `transcript_path` (Claude; Devin is Claude-format compatible; codex sends it too) or live session state (pi's `ctx.sessionManager`); other harnesses declare `(no rationale captured)`.
 - An MCP variant was built and **deleted**: same declaration for a Claude-Code-only setup with more moving parts. The shim now covers hookless agents environmentally.
 - Source: `integrations/hooks/bb-auth-intent-hook.cpp`, `integrations/opencode/bb-auth-plugin.js`, `integrations/pi/bb-auth-extension.ts`.
+- Wired by [[agent-intent#Harness installer]]; hand-pasted README JSON left the channel dormant in practice.
+
+## Challenge-gated approval
+
+The Claude-format rewrite answers the harness `permissionDecision: "allow"`, which skips its prompt and Claude's auto mode classifier — safe only if polkit will then ask the human, so the hook checks first.
+
+- `pkcheck --action-id org.freedesktop.policykit.exec --process <hook pid>` without interaction: only exit 2 (challenge) unlocks the rewrite. Exit 0 (a YES rule such as systemd's `empower.rules`), 1, errors, a 1 s timeout, or no `pkcheck` keep the original command on the harness's own path. Checked before declaring so the audit `command` matches what runs.
+- "Don't rewrite" beat `"ask"` for the silent case: Codex rejects `ask`, and one rule for every harness keeps the harness gate intact.
+- Residual: unprivileged callers cannot pass pkexec's `program` detail, so per-program YES rules are not modeled.
+- The shim, CLI, and opencode/pi plugins emit no harness approval, so they need no gate: under a YES rule the agent could already run `pkexec` itself.
+
+## Handoff context
+
+A rewrite tells the model, via `additionalContext`, that a human now owns the decision: approval happens at a desktop prompt, and exit 126/127 means declined — don't retry through `sudo -S`, askpass, `su`, `run0`, or sudoers/polkit edits.
+
+## Post-run annotation
+
+For Claude Code only (no `turn_id`), the hook also handles `PostToolUse`/`PostToolUseFailure` on a leading `pkexec`, dispatching on `hook_event_name`; other events it does not handle exit silently.
+
+- `PostToolUse` → `classifierContext` for the auto mode classifier. A fresh `pkcheck` that still challenges proves the run authenticated (`auth_admin` keeps no authorization); otherwise it reports "authorized without a prompt". Truthful by construction; never relays tool output.
+- `PostToolUseFailure` whose `error` starts `Exit code 126`/`127` → `additionalContext` naming the decline. Other exit codes print nothing.
+- Post events never declare — a declare there would clobber a pending reason under latest-wins correlation.
+
+## Harness installer
+
+`bb-auth-agents` (`integrations/agents/`) wires Claude Code, Codex, Gemini CLI, Devin, opencode, and pi with `status`/`install`/`uninstall` — the channel only helps if it is actually on.
+
+- Ownership: hook entries whose command basename is `bb-auth-intent-hook`, Claude `autoMode` strings prefixed `bb-auth:`, and the `bb-auth-plugin.js`/`bb-auth-extension.ts` drop-ins. Install = strip ours + add current, so re-runs are no-ops and stale hook paths get replaced; comparison is order-free so user entries appended later never trigger rewrites.
+- First edit of a file saves `<file>.bb-auth-backup`; drop-ins are symlinks into the datadir so package upgrades propagate.
+- Claude also gets an `autoMode.environment` entry (how escalation is supervised) and a `soft_deny` entry (workarounds after a declined prompt). A created list starts with `"$defaults"` — a bare list would replace the built-in rules.
+- `status` reports per-harness wiring plus hook `--version`, daemon ping, and the `pkcheck` result, i.e. whether rewrites are live.
+- A Claude Code plugin was considered: it needs a marketplace manifest and still leaves five harnesses manual.
 
 ## Agent CLI channel
 
-`aisudo` (`integrations/agent-cli/`, also installed as compatibility alias `bb-auth-declare`) is the voluntary channel for harnesses without a hook: the agent runs `aisudo CMD`, which declares intent, applies the shared [[agent-intent#Escalation translation]] rules, and execs the command.
+`aisudo` (`integrations/agent-cli/`) is the voluntary channel for harnesses without a hook: the agent runs `aisudo CMD`, which declares intent, applies the shared [[agent-intent#Escalation translation]] rules, and execs the command.
 
 - The name is the verb: a bare `aisudo CMD` normalizes to `sudo CMD`; an explicit `sudo`/`doas`/`pkexec` launcher inside the command is accepted and absorbed. `-r`/`--reason` is optional and defaults to the command string; `--json` takes a structured object (inline or `-` on stdin); `--dry-run` prints the resolved plan without daemon contact or exec.
 - Agent identity is auto-detected by walking PPID ancestry (`_detect_agent`), same signature family as the daemon's resolver.
 - Fails open like the hook: declaration failure or an unreachable daemon leaves the command unchanged — translation applies whenever the daemon *answers* (`bound` true or false), matching the shim's rule.
+- The `bb-auth-declare` alias was removed: it had no users beyond this machine and doubled the name surface agents see.
 
 ## PATH shim channel
 
@@ -52,6 +85,7 @@ An AI agent's `sudo`/`pkexec` escalation used to look identical to the user's ow
 - Supported option subset: `-n`/`--non-interactive` drops (the supervised GUI prompt *is* the non-interactive path — `sudo -n CMD` previously failed guaranteed under agents), `-u`/`--user` maps to `pkexec --user`, `--` is consumed.
 - Everything else declines — other options, `VAR=val` env assignments, shell metacharacters in any argument, and probe-only invocations (options but no command, e.g. `sudo -nv`) — running via the original launcher unchanged.
 - The CLI surfaces the translation or decline reason on stderr; the shim stays silent (passthrough must not leak noise into agent transcripts).
+- Four copies exist (C++ hook, Python, pi TS, opencode JS) because each harness loads its own runtime; `tests/fixtures/escalation-translation.json` is the one set of vectors all four are tested against.
 
 ## sudo to pkexec rewrite
 
@@ -59,6 +93,7 @@ The hook rewrites a *clean leading* `sudo CMD`/`doas CMD` into `pkexec CMD` via 
 
 - Shares the [[agent-intent#Escalation translation]] subset: `-n`/`--non-interactive` drops, `-u`/`--user` maps to `pkexec --user`, `--` ends options; other options, env assignments, and shell metacharacters (`|`, `&&`, `;`, redirects, subshells, substitution) decline — pkexec's flags and minimal env differ from sudo's and mis-rewriting could change behaviour.
 - Declined commands run unchanged, still with intent declared; the rewrite is surfaced via `permissionDecisionReason`, never silent.
+- The envelope carries the full original `tool_input` with only `command` swapped: Claude replaces the whole input, so sending `{command}` alone silently dropped `timeout`/`run_in_background`.
 
 ## Attribution band
 

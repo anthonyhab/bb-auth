@@ -145,13 +145,15 @@ configure_file(assets/bb-auth-bootstrap.sh.in bb-auth-bootstrap @ONLY)
 install(TARGETS bb-auth
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
 
-# Agent intent hook — PreToolUse/BeforeTool integration for Claude Code, Devin,
-# and Gemini CLI (auto-detected from the hook payload). Declares who+why to the
-# daemon and routes a simple leading `sudo` through pkexec so bb-auth can
-# supervise the escalation. Console helper; Qt6::Core only (JSON), raw POSIX.
+# Agent intent hook — PreToolUse/BeforeTool integration for Claude Code, Codex,
+# Devin, and Gemini CLI (auto-detected from the hook payload). Declares who+why
+# to the daemon and, when polkit will challenge the user, routes a simple
+# leading `sudo` through pkexec so bb-auth supervises the escalation; also
+# annotates Claude Code post-run events. Console helper; Qt6::Core only.
 qt_add_executable(bb-auth-intent-hook
         integrations/hooks/bb-auth-intent-hook.cpp)
 target_link_libraries(bb-auth-intent-hook PRIVATE Qt6::Core)
+target_compile_definitions(bb-auth-intent-hook PRIVATE BB_AUTH_VERSION="${VER}")
 install(TARGETS bb-auth-intent-hook
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
 
@@ -179,9 +181,15 @@ file(RELATIVE_PATH BB_AUTH_SHIM_LINK_TARGET
 configure_file(integrations/agent-cli/aisudo.in aisudo @ONLY)
 install(PROGRAMS ${CMAKE_BINARY_DIR}/aisudo
         DESTINATION ${CMAKE_INSTALL_BINDIR})
-# bb-auth-declare stays installed as the compatibility alias.
-install(PROGRAMS ${CMAKE_BINARY_DIR}/aisudo
-        DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME bb-auth-declare)
+
+# Harness installer — wires the hook/plugins into each agent's config
+# (status/install/uninstall). Paths are baked in at configure time.
+set(BB_AUTH_INTENT_HOOK_PATH "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-intent-hook")
+set(BB_AUTH_INTEGRATIONS_DIR "${CMAKE_INSTALL_FULL_DATADIR}/bb-auth/integrations")
+set(BB_AUTH_VERSION_STRING "${VER}")
+configure_file(integrations/agents/bb-auth-agents.in bb-auth-agents @ONLY)
+install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-agents
+        DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 install(CODE "
     if(\"${CMAKE_INSTALL_LIBEXECDIR}\" MATCHES \"^/\")
@@ -314,6 +322,12 @@ if(Python3_Interpreter_FOUND)
         ENVIRONMENT "BB_AUTH_INTENT_HOOK=${CMAKE_BINARY_DIR}/bb-auth-intent-hook")
     add_test(NAME bb-auth-pi-extension
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_pi_extension.py)
+    add_test(NAME bb-auth-opencode-plugin
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_opencode_plugin.py)
+    add_test(NAME bb-auth-agents
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agents_installer.py)
+    set_tests_properties(bb-auth-agents PROPERTIES
+        ENVIRONMENT "BB_AUTH_AGENTS=${CMAKE_BINARY_DIR}/bb-auth-agents")
 endif()
 
 install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-bootstrap

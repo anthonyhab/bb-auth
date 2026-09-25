@@ -239,7 +239,7 @@ class ShimCase(unittest.TestCase):
         self.assertIn("sudo true", self.exec_log())
         self.assertNotIn("pkexec", self.exec_log())
 
-    # --- CLI mode (aisudo / bb-auth-declare argv0) ---
+    # --- CLI mode (aisudo argv0) ---
 
     def test_cli_bare_command_normalizes_to_sudo(self):
         r = self.run_cli(["make", "install"])
@@ -377,6 +377,18 @@ class ShimCase(unittest.TestCase):
         # Options after the command are the command's own args.
         self.assertEqual(m._translate("sudo", ["cmd", "-n", "x"])[0],
                          ["pkexec", "cmd", "-n", "x"])
+
+    def test_shared_translation_vectors(self):
+        import shlex
+        m = _load_module()
+        fixture = os.path.join(_HERE, "fixtures", "escalation-translation.json")
+        with open(fixture) as f:
+            rows = json.load(f)["rows"]
+        for row in rows:
+            with self.subTest(command=row["command"]):
+                argv = shlex.split(row["command"])
+                got = m._translate(argv[0], argv[1:])[0] if argv else None
+                self.assertEqual(got, shlex.split(row["rewrite"]) if row["rewrite"] else None)
 
     def test_agent_token_matching(self):
         m = _load_module()

@@ -66,6 +66,26 @@ Random byte frames interleaved with pings on one connection must each yield a re
 
 Non-object JSON, null/numeric/empty/duplicate `type`, padded and escaped frames must each produce a bounded response — error or dispatch — with the connection staying usable.
 
+## Agent handoff
+
+Guarantees of the harness handoff ([[agent-intent#Challenge-gated approval]]) — driven by the Python tests against the built hook, the installer, and each translator.
+
+### Shared translation vectors
+
+Every row of `tests/fixtures/escalation-translation.json` must produce the same rewrite (or none) from the hook as from aisudo, pi, and opencode — translator drift fails the build.
+
+### Silent polkit authorization keeps the harness gate
+
+When `pkcheck` reports anything but a challenge (YES rule, denial, error) the hook emits no rewrite and no "allow" — the harness never waves through a command polkit would not stop.
+
+### Post-run annotation
+
+Claude `PostToolUse` on pkexec yields a truthful `classifierContext`, 126/127 failures yield decline guidance, unrelated failures and Codex yield nothing, and post events never declare.
+
+### Installer is idempotent and ownership-bounded
+
+`bb-auth-agents install` twice is byte-identical, keeps unrelated settings, and `uninstall` restores the original config exactly.
+
 ## Daemon lifecycle
 
 Socket ownership rules enforced by `IpcServer::start` (`src/core/ipc/`) — a second daemon must never steal a live agent's socket path.
