@@ -2,7 +2,7 @@
 pkgname=bb-auth-git
 pkgver=r43.fc40397
 pkgrel=1
-pkgdesc="Unified polkit, keyring, and pinentry authentication daemon"
+pkgdesc="One trusted prompt for polkit, keyring, and GPG — with AI-agent supervision (git)"
 arch=('x86_64')
 url="https://github.com/anthonyhab/bb-auth"
 license=('BSD-3-Clause')
@@ -10,6 +10,7 @@ depends=(
     'qt6-base'
     'polkit-qt6'
     'polkit'
+    'gcr-4'
     'gnome-keyring'
     'json-glib'
 )
@@ -18,8 +19,8 @@ makedepends=(
     'cmake'
 )
 optdepends=(
-    'fprintd: Fingerprint authentication support'
-    'libfido2: FIDO2 device support'
+    'fprintd: fingerprint via the polkit PAM stack'
+    'pam-u2f: FIDO2 security keys via the polkit PAM stack'
     'python: aisudo, PATH shims, and the bb-auth-agents harness installer'
 )
 provides=('bb-auth')

@@ -1,7 +1,6 @@
 # bb-auth Plan
 
 Last updated: 2026-09-25
-Owner branch: `main`
 
 ## Vision
 
@@ -145,8 +144,8 @@ Tasks:
 - [x] Handoff context for the model + Claude Code post-run annotation (`classifierContext`, 126/127 decline guidance).
 - [x] `bb-auth-agents` installer (status/install/uninstall) incl. Claude `autoMode` entries.
 - [x] Shared translation vectors across all four translators.
-- [ ] Keyboard-path validation of the attribution band on a live prompt.
-- [ ] Release: bump version, AUR package ships `bb-auth-agents`.
+- [x] Keyboard-path validation of the attribution band (fallback: `agentAttribution_keepsKeyboardPath`; the omarchy QML prompt is validated in its own plugin repo).
+- [x] Forgejo CI + tag-driven release pipeline; stable AUR package pinned to the verified commit.
 
 Exit criteria:
 
@@ -176,49 +175,19 @@ Packaging:
 - Core package remains minimal and deterministic.
 - Optional providers add functionality without changing core behavior.
 
-## Near-Term Backlog (next 2-3 sessions)
+## Next: toward 1.0
 
-- [x] Refactor out in-tree GTK provider code from core repo (external provider template now documented).
-- [x] Add `docs/PROVIDER_PACKAGING.md`.
-- [x] Add test target for provider conformance.
-- [x] Add CI job that validates "core-only" installation path.
-- [x] Add CI job that validates "core + optional provider" path.
+- **Omarchy distribution.** Publish the omarchy prompt provider (today a
+  local plugin) with one setup command that disables Omarchy's built-in shell
+  polkit agent and runs `bb-auth-agents install`.
+- **Fingerprint/FIDO2 verification.** Exercise the PAM fingerprint path end to
+  end with libfprint's virtual device in a disposable VM; replace PAM-text
+  keyword matching with an fprintd D-Bus check (language-independent).
+- **Askpass.** One `SSH_ASKPASS`/`SUDO_ASKPASS`/`GIT_ASKPASS` helper; askpass
+  returns the plaintext to the caller, so the prompt must lead with caller
+  identity.
+- **Name.** Decide whether to rename before 1.0 (touches socket path, D-Bus
+  name, unit, AUR package, provider contract); 0.3.0 keeps `bb-auth`.
 
-## Session Workflow (for future contributors/agents)
-
-Per session:
-
-1. Read this `PLAN.md` and align work to one phase.
-2. State the exact acceptance criteria before editing.
-3. Implement smallest coherent slice with tests.
-4. Run local verification (`cmake`, `ctest`, packaging checks as needed).
-5. Update `PLAN.md` checkboxes and add short changelog note in PR.
-
-Do not:
-
-- expand core dependencies for optional UX experiments
-- introduce provider-protocol changes without docs + tests
-- merge UX changes without flow-level validation
-
-## Changelog Notes
-
-- 2026-02-18: AUR packaging switched to deterministic minimal default (`BB_AUTH_GTK_FALLBACK=OFF`), with optional GTK fallback build via explicit opt-in.
-- 2026-02-18: Removed in-tree GTK provider build/install from core; core packaging/CI now validates minimal Qt-first architecture.
-- 2026-02-18: Added provider conformance test suite and external provider packaging guide.
-- 2026-02-18: Added external provider template and Arch CI split for core-only plus drop-in provider template validation.
-- 2026-02-18: Removed remaining in-tree GTK provider source/assets from core repository.
-- 2026-02-18: Reworked provider contract into lock-candidate spec and expanded conformance coverage for heartbeat/tie-break/stale-prune behavior.
-- 2026-02-18: Locked provider contract at IPC v2.0 and added IPC conformance tests for invalid JSON, missing type, unknown type, and oversized buffered input disconnects.
-- 2026-02-18: Unified fallback prompt copy/rendering through shared prompt-model logic (polkit/keyring/pinentry) and added source-level model regression tests.
-- 2026-02-18: Improved fallback requestor/action clarity by surfacing polkit action context (`actionId`/user), strengthening weak requestor identity display, and adding model tests.
-- 2026-02-18: Tightened fallback error/cancel/retry/timeout UX with pending-action timeouts, pinentry retry status copy, and closed-error auto-dismiss coverage.
-- 2026-02-18: Added keyboard-first fallback UX checks (Enter submit, keyboard cancel activation, tab-order traversal where supported) and explicit pending-action focus recovery.
-- 2026-02-18: Completed fallback accessibility checks by hardening keyboard-only cancel recovery during submit-pending, switching UI text styling to theme-aware palette defaults for contrast resilience, and adding scaling/contrast regression tests.
-- 2026-02-18: Added `scripts/gate-local.sh` and `docs/LOCAL_RELEASE_WORKFLOW.md` to enforce local pre-main build/test/install/daemon gates before release-facing merges.
-- 2026-02-18: Added deterministic fuzz coverage (`tests/test_fuzz_inputs.cpp`) for provider manifest parsing and daemon IPC frames: seeded mutations plus adversarial structures (deep nesting, lone surrogates, oversized fields, garbage frames) must return structured errors and never wedge the server.
-- 2026-02-18: Fixed a socket-hijack race in `IpcServer::start` — a second daemon could unlink a live socket path and orphan the running agent. Start now probes the path and fails closed on a live peer. Covered by conflict/stale-file/restart tests in `test_ipc_contract.cpp`.
-- 2026-02-18: Added provider crash-failover and restart/reattest coverage (`test_provider_conformance.cpp`) plus session queueing/churn stress (`test_session_store.cpp`). Authorization-boundary audit: fail-closed `isAuthorized` is covered by `enforcesActiveProviderAuthorizationBoundary` and `untrustedProviderNeverBecomesActiveOrAuthorized`.
-- 2026-02-18: Added golden-snapshot prompt regression tests (`test_prompt_snapshots.cpp`) covering the complete display model per canonical scenario (polkit run/generic, agent declared/undeclared, keyring, pinentry OpenPGP, fingerprint).
-- 2026-02-18: Added `docs/COMPATIBILITY.md` — core↔IPC matrix, migration notes per protocol bump, and a release checklist.
-- 2026-09-17: Extended harness hook coverage to Codex CLI (`turn_id`-detected `PreToolUse`, `updatedInput` envelope) and pi (`tool_call` extension mutating `event.input`); added `pi-coding-agent` signature to both detectors; verified opencode plugin contract against current docs (anomalyco/opencode#31680 caveat retained).
-- 2026-09-25: Agent handoff (openspec `agent-handoff`): pkcheck-gated rewrite/allow, `additionalContext` + Claude post-run annotation, `bb-auth-agents` installer, shared translation fixture, dropped `bb-auth-declare` alias.
+Released changes live in `CHANGELOG.md`; contributor workflow lives in
+`AGENTS.md` and `docs/RELEASING.md`.

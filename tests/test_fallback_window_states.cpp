@@ -93,6 +93,7 @@ namespace bb {
         void cancelTimeout_releasesBusyAndShowsError();
         void closedError_autoDismissesToAvoidDeadEnd();
         void agentWithoutReason_showsUndeclaredState();
+        void agentAttribution_keepsKeyboardPath();
         void humanWithoutReason_hidesReasonLabel();
     };
 
@@ -337,6 +338,45 @@ namespace bb {
 
         QVERIFY(window.m_reasonLabel->isVisibleTo(&window));
         QCOMPARE(window.m_reasonLabel->text(), QStringLiteral("No reason declared by the agent."));
+    }
+
+    // Keyboard-path validation for the attribution band (AGENTS.md hard
+    // boundary): an agent prompt with a declared reason and a mismatch warning
+    // must keep Enter-submits, the Escape shortcut, and the input -> cancel ->
+    // submit tab chain — the band is display-only and never takes focus.
+    void FallbackWindowTouchModelTest::agentAttribution_keepsKeyboardPath() {
+        EnvVarGuard    timeoutGuard("BB_AUTH_FALLBACK_ACTION_TIMEOUT_MS", "5000");
+        FallbackClient client("/tmp/non-existent-bb-auth.sock");
+        FallbackWindow window(&client);
+
+        const QJsonObject context{{"message", "Authentication is required"},
+                                  {"requestor", QJsonObject{{"name", "Claude Code"}, {"isAgent", true}, {"agentKind", "claude-code"}, {"pid", 4242}}},
+                                  {"intent", QJsonObject{{"reason", "Cleaning the pacman cache"}, {"mismatch", true}}}};
+        const QJsonObject created{{"type", "session.created"}, {"id", "agent-kbd"}, {"source", "polkit"}, {"context", context}};
+        QVERIFY(QMetaObject::invokeMethod(&client, "sessionCreated", Qt::DirectConnection, Q_ARG(QJsonObject, created)));
+        QVERIFY(window.m_reasonLabel->isVisibleTo(&window));
+
+        for (QLabel* label : window.findChildren<QLabel*>())
+            QCOMPARE(label->focusPolicy(), Qt::NoFocus);
+
+        const QList<QShortcut*> shortcuts = window.findChildren<QShortcut*>();
+        QVERIFY(std::any_of(shortcuts.cbegin(), shortcuts.cend(), [](const QShortcut* shortcut) {
+            return shortcut && shortcut->key() == QKeySequence::Cancel && shortcut->context() == Qt::WindowShortcut;
+        }));
+
+        window.m_input->setFocus();
+        if (window.m_input->hasFocus()) {
+            QTest::keyClick(window.m_input, Qt::Key_Tab);
+            QTRY_VERIFY_WITH_TIMEOUT(window.m_cancelButton->hasFocus(), 1000);
+            QTest::keyClick(window.m_cancelButton, Qt::Key_Tab);
+            QTRY_VERIFY_WITH_TIMEOUT(window.m_submitButton->hasFocus(), 1000);
+            window.m_input->setFocus();
+        }
+
+        window.m_input->setText("secret");
+        QTest::keyClick(window.m_input, Qt::Key_Return);
+        QTRY_VERIFY_WITH_TIMEOUT(window.m_busy, 1000);
+        QCOMPARE(window.m_pendingAction, FallbackWindow::PendingAction::Submit);
     }
 
     void FallbackWindowTouchModelTest::humanWithoutReason_hidesReasonLabel() {

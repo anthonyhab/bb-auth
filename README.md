@@ -1,10 +1,13 @@
 # bb-auth
 
-`bb-auth` gives you one consistent authentication prompt on Linux for:
+One trusted prompt for every secret your Linux desktop asks for — and a
+supervised handoff when an AI agent asks for root.
 
-- polkit (`pkexec`)
+- polkit (`pkexec`), including fingerprint/FIDO2 steps from the polkit PAM stack
 - GNOME Keyring system prompts
-- GPG pinentry
+- GPG pinentry (and SSH, when gpg-agent is your SSH agent)
+- AI coding agents' `sudo`: attributed, explained, and approved by you
+  ([Agent Supervision](#agent-supervision-ai-agents))
 
 It runs as a user daemon and routes requests to a UI provider.
 If no external provider is available, it automatically uses a built-in Qt fallback prompt.
@@ -43,10 +46,11 @@ You may want to wait if you prefer the exact default KDE/GNOME behavior and do n
 
 ### 1. Install
 
-Arch:
+Arch (AUR):
 
 ```bash
-yay -S bb-auth-git
+yay -S bb-auth        # tagged releases
+yay -S bb-auth-git    # tracks main
 ```
 
 Nix:
@@ -77,6 +81,12 @@ systemctl --user status bb-auth.service
 
 ```bash
 pkexec echo ok
+```
+
+### 4. Supervise AI agents (optional)
+
+```bash
+bb-auth-agents install    # wires Claude Code, Codex, Gemini, Devin, opencode, pi
 ```
 
 ## Common Setup Problems
@@ -202,7 +212,7 @@ STRICT_DAEMON_SMOKE=1 ./scripts/gate-local.sh --deploy-local
 
 Workflow:
 
-- `docs/LOCAL_RELEASE_WORKFLOW.md`
+- `docs/RELEASING.md`
 - `PLAN.md`
 - `AGENTS.md`
 

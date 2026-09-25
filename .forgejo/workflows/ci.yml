@@ -1,0 +1,75 @@
+# Forgejo is the CI and release authority for bb-auth; the GitHub mirror runs
+# no Actions. The gate job runs the same scripts/gate-local.sh contributors run
+# before merging, so "green locally" and "green in CI" mean the same thing.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gate:
+    name: Build, tests, install + daemon smoke, docs integrity
+    runs-on: ubuntu-latest
+    container:
+      # Rolling on purpose: Arch is the primary target and the AUR package
+      # builds against current repos, so CI must track them too.
+      image: archlinux:base-devel
+    steps:
+      - name: Install toolchain
+        # nodejs runs the checkout action and the opencode/pi plugin tests;
+        # lat.md and openspec are pinned to the versions the repo was
+        # authored with.
+        run: |
+          pacman -Syu --noconfirm --needed git cmake qt6-base polkit-qt6 polkit \
+            gcr-4 gnome-keyring json-glib python nodejs npm
+          npm install -g lat.md@0.12.2 @fission-ai/openspec@1.13.2
+      - name: Checkout
+        uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          token: ${{ forgejo.token }}
+          github-server-url: http://forgejo:3000
+          persist-credentials: false
+      - name: Unprivileged build user
+        # makepkg and the daemon smoke refuse or misbehave as root.
+        run: |
+          useradd -m builder
+          chown -R builder: .
+      - name: Local gate (build-check, build-core, install + daemon smoke)
+        run: su builder -c 'STRICT_DAEMON_SMOKE=1 ./scripts/gate-local.sh'
+      - name: Docs integrity (lat.md links/code refs, openspec specs)
+        run: su builder -c 'lat check && openspec validate --all'
+      - name: Provider template
+        run: |
+          su builder -c 'python -m py_compile examples/provider-template/provider.py &&
+            python examples/provider-template/provider.py --help >/dev/null'
+      - name: Release artifacts render
+        # Dry run of the tag pipeline so a broken PKGBUILD template or a
+        # missing CHANGELOG section fails before anyone tags.
+        run: |
+          su builder -c 'scripts/release-artifacts.sh "v$(cat VERSION)" "$(git rev-parse HEAD)" /tmp/release-dry-run'
+
+  nix:
+    name: Nix flake build
+    runs-on: ubuntu-latest
+    container:
+      image: nixos/nix:latest
+    env:
+      NIX_CONFIG: |
+        experimental-features = nix-command flakes
+        sandbox = false
+    steps:
+      - name: Checkout
+        # No node in this image, so the checkout action cannot run; fetch the
+        # exact commit over the internal URL instead.
+        env:
+          TOKEN: ${{ forgejo.token }}
+        run: |
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git init -q src
+          git -C src -c http.extraHeader="Authorization: Basic $auth" \
+            fetch -q --depth 1 "http://forgejo:3000/${{ forgejo.repository }}.git" "${{ forgejo.sha }}"
+          git -C src checkout -q FETCH_HEAD
+      - name: Build
+        run: nix build --print-build-logs ./src#bb-auth

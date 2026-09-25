@@ -1,23 +1,22 @@
-# Local Release Workflow (Main Guardrails)
+# Releasing
 
-Use this workflow to validate daemon changes before anything lands on `main`.
-`main` is release-facing for AUR users, so avoid direct pushes without gates.
+Forgejo (`git.hab.rip/habibe/bb-auth`) is the CI and release authority; the
+GitHub repository is a public mirror and runs no Actions. `main` is
+release-facing for AUR and Nix users.
+
+The same gate runs in three places, so their results mean the same thing:
+`./scripts/gate-local.sh` locally, the `gate` job of `.forgejo/workflows/ci.yml`
+on every push, and the release job on a tag.
 
 ## Branch Model
 
 1. Create a feature branch from `main`.
 2. Commit locally on the feature branch.
 3. Run local gates.
-4. Push the feature branch and open a PR.
-5. Merge to `main` only after local gates + CI are green.
-
-Example:
-
-```bash
-git switch main
-git pull --ff-only origin main
-git switch -c fix/<short-name>
-```
+4. Push the feature branch to Forgejo (`hab`) and wait for CI:
+   `fj watch --sha HEAD`.
+5. Fast-forward `main` only after local gates + Forgejo CI are green, then
+   mirror `main` to GitHub (fast-forward only on both; never force-push).
 
 ## Local Gates (One Command)
 
@@ -95,8 +94,9 @@ Then run the full gates before opening/merging PR.
 ## Merge Discipline
 
 - Do not push feature work directly to `main`.
-- Keep PRs small and focused.
-- Prefer squash merge for stacked/iterative AI-generated branches to reduce history clutter.
+- Keep branches small; before merging, rewrite *unpublished* history into one
+  commit per logical change with a message that says why. Never rewrite
+  history that has reached either remote.
 
 Command aliases:
 
@@ -105,12 +105,24 @@ Command aliases:
 - `make gate-release` -> strict daemon + local AUR smoke
 - `make deploy-local` -> strict gates + install local package over AUR install
 
-## Release Discipline
+## Cutting a release
 
-After merge to `main`:
+1. On the release branch: bump `VERSION`, move `[Unreleased]` in
+   `CHANGELOG.md` to `[X.Y.Z] - date`, update `docs/COMPATIBILITY.md`. CI's
+   "Release artifacts render" step fails if the tag, `VERSION`, or the
+   changelog section disagree.
+2. Fast-forward `main` once Forgejo CI is green; mirror to GitHub.
+3. Tag the exact `main` commit and push the tag to Forgejo first:
+   `git tag -a vX.Y.Z -m vX.Y.Z && git push hab vX.Y.Z`.
+4. `.forgejo/workflows/release.yml` re-runs the full gate on that commit, then
+   publishes a Forgejo release with the notes, a source tarball,
+   `SHA256SUMS`, and the rendered AUR `PKGBUILD`/`SRCINFO`. That release is
+   the authorization record.
+5. Push the tag to GitHub (`git push origin vX.Y.Z`) — the AUR `PKGBUILD`
+   fetches `git+https://github.com/anthonyhab/bb-auth.git#commit=<SHA>`, so
+   the public build is pinned to the verified commit, not to a mutable ref.
+6. Publish to the AUR: copy the release's `PKGBUILD` and `SRCINFO` (as
+   `.SRCINFO`) into the `bb-auth` AUR repo, commit, push.
 
-1. Bump `VERSION`.
-2. Tag the release (`vX.Y.Z`) on the final commit.
-3. Publish release notes.
-
-If a post-release fix is needed, cut a patch release (`vX.Y.(Z+1)`), do not rewrite published release history.
+If a post-release fix is needed, cut a patch release (`vX.Y.(Z+1)`); never
+move or re-push a published tag.

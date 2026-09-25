@@ -1,0 +1,56 @@
+# Tag pipeline. A v* tag is released only after the full gate passes on that
+# exact commit; the published PKGBUILD pins that commit SHA, so the Forgejo
+# release is the authorization record for what AUR users build.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Gate, render artifacts, publish Forgejo release
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Install toolchain
+        run: |
+          pacman -Syu --noconfirm --needed git cmake qt6-base polkit-qt6 polkit \
+            gcr-4 gnome-keyring json-glib python nodejs npm
+          npm install -g lat.md@0.12.2 @fission-ai/openspec@1.13.2
+      - name: Checkout
+        uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          token: ${{ forgejo.token }}
+          github-server-url: http://forgejo:3000
+          persist-credentials: false
+      - name: Unprivileged build user
+        run: |
+          useradd -m builder
+          chown -R builder: .
+      - name: Full gate on the tagged commit
+        run: su builder -c 'STRICT_DAEMON_SMOKE=1 ./scripts/gate-local.sh && lat check && openspec validate --all'
+      - name: Render artifacts
+        run: |
+          su builder -c 'scripts/release-artifacts.sh "${{ forgejo.ref_name }}" "${{ forgejo.sha }}" dist'
+          su builder -c 'v=$(cat VERSION); git archive --prefix="bb-auth-$v/" -o "dist/bb-auth-$v.tar.gz" "${{ forgejo.sha }}"'
+          cd dist && sha256sum bb-auth-*.tar.gz PKGBUILD .SRCINFO > SHA256SUMS && cat SHA256SUMS
+      - name: Publish Forgejo release
+        env:
+          TOKEN: ${{ forgejo.token }}
+          API: http://forgejo:3000/api/v1/repos/${{ forgejo.repository }}
+          TAG: ${{ forgejo.ref_name }}
+        run: |
+          set -euo pipefail
+          body="$(python3 -c 'import json,sys; print(json.dumps({"tag_name": sys.argv[1], "name": sys.argv[1], "body": open("dist/release-notes.md").read()}))' "$TAG")"
+          id="$(curl -fsS -X POST -H "Authorization: token $TOKEN" -H 'Content-Type: application/json' \
+            -d "$body" "$API/releases" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+          for f in dist/bb-auth-*.tar.gz dist/PKGBUILD dist/.SRCINFO dist/SHA256SUMS; do
+            name="$(basename "$f")"
+            [ "$name" = .SRCINFO ] && name=SRCINFO
+            curl -fsS -H "Authorization: token $TOKEN" -F "attachment=@$f" \
+              "$API/releases/$id/assets?name=$name" >/dev/null
+          done
+          echo "published release $id for $TAG at ${{ forgejo.sha }}"

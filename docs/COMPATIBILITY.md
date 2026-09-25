@@ -9,7 +9,7 @@ Core release ↔ provider IPC protocol. The normative contract is
 |---|---|---|---|
 | v0.1.x | none (pre-contract) | — | No external provider support; built-in fallback only |
 | v0.2.0 | `2.0` | IPC v2.0 | Providers self-register over the socket; any registered provider can become active |
-| next release (0.3.0, unreleased) | `3.0` | IPC v3.0 | Providers must be daemon-launched from a `providers.d` manifest to become active; agent-attribution fields added |
+| v0.3.0 | `3.0` | IPC v3.0 | Providers must be daemon-launched from a `providers.d` manifest to become active; agent-attribution fields added |
 
 Notes:
 
@@ -21,7 +21,7 @@ Notes:
 
 ## Upgrade notes
 
-### v0.2.0 → IPC 3.0 builds
+### v0.2.0 → v0.3.0 (IPC 3.0)
 
 Breaking change — authorization model:
 

@@ -1,0 +1,39 @@
+# Maintainer: anthonyhab
+# Rendered by scripts/release-artifacts.sh from packaging/aur/PKGBUILD.in.
+# _commit is the exact SHA the Forgejo release run verified; the git object
+# hash is the integrity check, so nothing but that tree can be built.
+pkgname=bb-auth
+pkgver=@VERSION@
+pkgrel=1
+_commit=@COMMIT@
+pkgdesc="One trusted prompt for polkit, keyring, and GPG — with AI-agent supervision"
+arch=('x86_64')
+url="https://github.com/anthonyhab/bb-auth"
+license=('BSD-3-Clause')
+depends=('qt6-base' 'polkit-qt6' 'polkit' 'gcr-4' 'json-glib' 'gnome-keyring')
+makedepends=('git' 'cmake')
+checkdepends=('python')
+optdepends=(
+    'python: aisudo, PATH shims, and the bb-auth-agents harness installer'
+    'fprintd: fingerprint via the polkit PAM stack'
+    'pam-u2f: FIDO2 security keys via the polkit PAM stack'
+)
+provides=('bb-auth')
+conflicts=('bb-auth-git')
+replaces=('noctalia-auth-git' 'noctalia-polkit-git' 'noctalia-unofficial-auth-agent-git')
+source=("bb-auth::git+https://github.com/anthonyhab/bb-auth.git#commit=${_commit}")
+sha256sums=('SKIP')
+
+build() {
+    cmake -S bb-auth -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build
+}
+
+check() {
+    ctest --test-dir build --output-on-failure
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+    install -Dm644 bb-auth/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
