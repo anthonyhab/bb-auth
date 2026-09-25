@@ -33,6 +33,6 @@ Everything under `src/core/providers/` plus the trust stores decides *which* UI 
 
 ## Agent integrations
 
-`integrations/` holds agent-facing glue that is **not** core: the multi-harness hook, `aisudo` CLI + PATH shim, opencode/pi plugins, and the `bb-auth-agents` installer ([[agent-intent#Agent intent surfacing]]).
+`integrations/` holds agent-facing glue that is **not** core: the `bb-auth-agent` multi-call binary (hook, `aisudo`, PATH shims, installer) and the opencode/pi plugins ([[agent-intent#Agent intent surfacing]]).
 
 `bb-auth-intent-hook` auto-detects Claude Code/Codex/Devin `PreToolUse` and Gemini `BeforeTool` payloads, declares intent, and — when polkit will challenge — rewrites clean `sudo` → `pkexec`; it also annotates Claude Code post-run events. The `aisudo` script is installed as `sudo`/`doas`/`pkexec` shim symlinks that pass through for humans and declare + translate for agents. The opencode plugin and pi extension hook their harness's tool call for the same effect; `bb-auth-agents` wires all of them.

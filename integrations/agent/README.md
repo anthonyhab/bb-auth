@@ -1,13 +1,14 @@
-# bb-auth agent intent hook
+# bb-auth agent supervision
 
 Make AI agents safer to run in auto-approve mode: when an agent runs a privileged
 command (`sudo`/`pkexec`/`doas`), surface **who** is asking and **why** at the
 bb-auth authentication prompt — and route the escalation through bb-auth's
 supervised prompt instead of an unsupervised `sudo`.
 
-`bb-auth-intent-hook.cpp` is a small compiled `Qt6::Core` console binary
-(installed to the daemon's `libexec`) that auto-detects the harness from the
-hook payload. It does two display/audit-only things, both fail-open:
+`bb-auth-agent` is one small compiled `Qt6::Core` binary (in the daemon's
+`libexec`) behind every agent-facing name: `bb-auth-intent-hook`, `aisudo`,
+`bb-auth-agents`, and the `sudo`/`doas`/`pkexec` PATH shims. As a hook it
+auto-detects the harness from the payload. It does two display/audit-only things, both fail-open:
 
 1. **Declares who + why.** It POSTs `intent.declare` over the bb-auth socket
    (extracting the most recent assistant rationale when the harness exposes a

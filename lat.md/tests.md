@@ -68,7 +68,7 @@ Non-object JSON, null/numeric/empty/duplicate `type`, padded and escaped frames 
 
 ## Agent handoff
 
-Guarantees of the harness handoff ([[agent-intent#Challenge-gated approval]]) — driven by the Python tests against the built hook, the installer, and each translator.
+Guarantees of the harness handoff ([[agent-intent#Challenge-gated approval]]) — driven by Python test suites that run the built `bb-auth-agent` and each plugin as subprocesses.
 
 ### Shared translation vectors
 

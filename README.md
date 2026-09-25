@@ -165,8 +165,7 @@ Hookless agents (aider, cursor-agent, …) use one of:
 
 Residual limits: absolute-path invocations (`/usr/bin/sudo`) bypass PATH shims;
 attribution is display/audit only and never gates the allow/deny decision.
-Requires `python3` for `aisudo`/`bb-auth-agents` (Arch: `python` optdepend).
-Details: `integrations/hooks/README.md`.
+Details: `integrations/agent/README.md`.
 
 ## Provider Model (Advanced)
 

@@ -287,7 +287,6 @@ class HookCase(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
         self.assertEqual(self.declared(), [])
 
-    # @lat: [[tests#Agent handoff#Shared translation vectors]]
     def test_shared_translation_vectors(self):
         with open(FIXTURE) as f:
             rows = json.load(f)["rows"]

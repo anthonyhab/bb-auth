@@ -26,7 +26,7 @@ An AI agent's `sudo`/`pkexec` escalation used to look identical to the user's ow
 - Claude Code's matcher is **`if`-gated** (`if: "Bash(sudo *)"`/`pkexec`/`doas` permission-rule syntax) so the process spawns only on actual escalations; Devin/Gemini matchers are tool-name regexes, so the hook self-filters privileged prefixes in ~1 ms. This is the load-bearing performance decision.
 - A real rationale reaches the prompt only when the harness exposes `transcript_path` (Claude; Devin is Claude-format compatible; codex sends it too) or live session state (pi's `ctx.sessionManager`); other harnesses declare `(no rationale captured)`.
 - An MCP variant was built and **deleted**: same declaration for a Claude-Code-only setup with more moving parts. The shim now covers hookless agents environmentally.
-- Source: `integrations/hooks/bb-auth-intent-hook.cpp`, `integrations/opencode/bb-auth-plugin.js`, `integrations/pi/bb-auth-extension.ts`.
+- Source: `integrations/agent/Hook.cpp` (one mode of [[agent-intent#Agent binary]]), `integrations/opencode/bb-auth-plugin.js`, `integrations/pi/bb-auth-extension.ts`.
 - Wired by [[agent-intent#Harness installer]]; hand-pasted README JSON left the channel dormant in practice.
 
 ## Challenge-gated approval
@@ -52,20 +52,29 @@ For Claude Code only (no `turn_id`), the hook also handles `PostToolUse`/`PostTo
 
 ## Harness installer
 
-`bb-auth-agents` (`integrations/agents/`) wires Claude Code, Codex, Gemini CLI, Devin, opencode, and pi with `status`/`install`/`uninstall` — the channel only helps if it is actually on.
+`bb-auth-agents` (`integrations/agent/Installer.cpp`) wires Claude Code, Codex, Gemini CLI, Devin, opencode, and pi with `status`/`install`/`uninstall` — the channel only helps if it is actually on.
 
 - Ownership: hook entries whose command basename is `bb-auth-intent-hook`, Claude `autoMode` strings prefixed `bb-auth:`, and the `bb-auth-plugin.js`/`bb-auth-extension.ts` drop-ins. Install = strip ours + add current, so re-runs are no-ops and stale hook paths get replaced; comparison is order-free so user entries appended later never trigger rewrites.
 - First edit of a file saves `<file>.bb-auth-backup`; drop-ins are symlinks into the datadir so package upgrades propagate.
 - Claude also gets an `autoMode.environment` entry (how escalation is supervised) and a `soft_deny` entry (workarounds after a declined prompt). A created list starts with `"$defaults"` — a bare list would replace the built-in rules.
 - `status` reports per-harness wiring plus hook `--version`, daemon ping, and the `pkcheck` result, i.e. whether rewrites are live.
+- Config files are edited through an order-preserving JSON layer (`integrations/agent/OrderedJson.cpp`): `QJsonObject` sorts keys, which would reshuffle a user's `settings.json` on every edit. Output matches the conventional 2-space form, so files round-trip byte-for-byte.
 - A Claude Code plugin was considered: it needs a marketplace manifest and still leaves five harnesses manual.
+
+## Agent binary
+
+`bb-auth-agent` is one Qt6::Core binary behind every agent-facing name, dispatched by `argv[0]`: `bb-auth-intent-hook`, `aisudo`, `bb-auth-agents`, and the `sudo`/`doas`/`pkexec` shims are symlinks to it.
+
+- Replaced the Python `aisudo`/`bb-auth-agents` scripts: no interpreter on the sudo path (~2 ms vs ~27 ms startup), no `/usr/bin/env python3` resolving to whatever venv is first on PATH, one version string for every tool, and no runtime Python dependency.
+- No `QCoreApplication`: nothing needs an event loop, and a sudo shim must never let Qt interpret its argv.
+- Build-tree symlinks mirror the installed names so tests exercise the same dispatch. Python remains a *test-only* dependency (the suites drive the binary as a subprocess).
 
 ## Agent CLI channel
 
-`aisudo` (`integrations/agent-cli/`) is the voluntary channel for harnesses without a hook: the agent runs `aisudo CMD`, which declares intent, applies the shared [[agent-intent#Escalation translation]] rules, and execs the command.
+`aisudo` (`integrations/agent/Aisudo.cpp`) is the voluntary channel for harnesses without a hook: the agent runs `aisudo CMD`, which declares intent, applies the shared [[agent-intent#Escalation translation]] rules, and execs the command.
 
 - The name is the verb: a bare `aisudo CMD` normalizes to `sudo CMD`; an explicit `sudo`/`doas`/`pkexec` launcher inside the command is accepted and absorbed. `-r`/`--reason` is optional and defaults to the command string; `--json` takes a structured object (inline or `-` on stdin); `--dry-run` prints the resolved plan without daemon contact or exec.
-- Agent identity is auto-detected by walking PPID ancestry (`_detect_agent`), same signature family as the daemon's resolver.
+- Agent identity is auto-detected by walking same-uid PPID ancestry with the daemon's own detector (`src/common/ProcAgent.cpp`) — one alias table, not a mirrored copy.
 - Fails open like the hook: declaration failure or an unreachable daemon leaves the command unchanged — translation applies whenever the daemon *answers* (`bound` true or false), matching the shim's rule.
 - The `bb-auth-declare` alias was removed: it had no users beyond this machine and doubled the name surface agents see.
 
@@ -80,12 +89,12 @@ For Claude Code only (no `turn_id`), the hook also handles `PostToolUse`/`PostTo
 
 ## Escalation translation
 
-`_translate` (`aisudo.in`) is the shared `sudo`/`doas` → `pkexec` translator used by both the CLI and the PATH shim; it returns the rewritten argv or a decline reason.
+`translateArgv` (`integrations/agent/Translate.cpp`) is the `sudo`/`doas` → `pkexec` translator shared by the CLI and the PATH shim; it returns the rewritten argv or a decline reason.
 
 - Supported option subset: `-n`/`--non-interactive` drops (the supervised GUI prompt *is* the non-interactive path — `sudo -n CMD` previously failed guaranteed under agents), `-u`/`--user` maps to `pkexec --user`, `--` is consumed.
 - Everything else declines — other options, `VAR=val` env assignments, shell metacharacters in any argument, and probe-only invocations (options but no command, e.g. `sudo -nv`) — running via the original launcher unchanged.
 - The CLI surfaces the translation or decline reason on stderr; the shim stays silent (passthrough must not leak noise into agent transcripts).
-- Four copies exist (C++ hook, Python, pi TS, opencode JS) because each harness loads its own runtime; `tests/fixtures/escalation-translation.json` is the one set of vectors all four are tested against.
+- Four implementations exist — argv-level and string-level (the hook must keep the agent's quoting byte-for-byte) in `Translate.cpp`, plus the pi TS and opencode JS plugins, which run inside their harness's runtime. `tests/fixtures/escalation-translation.json` is the one set of vectors all four are tested against.
 
 ## sudo to pkexec rewrite
 

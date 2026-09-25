@@ -14,7 +14,6 @@ depends=('qt6-base' 'polkit-qt6' 'polkit' 'gcr-4' 'json-glib' 'gnome-keyring')
 makedepends=('git' 'cmake')
 checkdepends=('python')
 optdepends=(
-    'python: aisudo, PATH shims, and the bb-auth-agents harness installer'
     'fprintd: fingerprint via the polkit PAM stack'
     'pam-u2f: FIDO2 security keys via the polkit PAM stack'
 )

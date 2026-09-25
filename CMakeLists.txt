@@ -80,6 +80,7 @@ qt_add_executable(bb-auth
     src/core/PolkitListener.cpp
     src/core/RequestContext.hpp
     src/core/RequestContext.cpp
+    src/common/ProcAgent.cpp
     src/core/ipc/IpcServer.cpp
 
     # Provider plumbing
@@ -145,67 +146,69 @@ configure_file(assets/bb-auth-bootstrap.sh.in bb-auth-bootstrap @ONLY)
 install(TARGETS bb-auth
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
 
-# Agent intent hook — PreToolUse/BeforeTool integration for Claude Code, Codex,
-# Devin, and Gemini CLI (auto-detected from the hook payload). Declares who+why
-# to the daemon and, when polkit will challenge the user, routes a simple
-# leading `sudo` through pkexec so bb-auth supervises the escalation; also
-# annotates Claude Code post-run events. Console helper; Qt6::Core only.
-qt_add_executable(bb-auth-intent-hook
-        integrations/hooks/bb-auth-intent-hook.cpp)
-target_link_libraries(bb-auth-intent-hook PRIVATE Qt6::Core)
-target_compile_definitions(bb-auth-intent-hook PRIVATE BB_AUTH_VERSION="${VER}")
-install(TARGETS bb-auth-intent-hook
+# bb-auth-agent — one Qt6::Core binary behind every agent-facing name,
+# dispatched by argv[0]: bb-auth-intent-hook (harness hook), aisudo
+# (voluntary CLI), bb-auth-agents (harness installer), and sudo/doas/pkexec
+# (agent-gated PATH shims under <libexec>/bb-auth-shims; <libexec>/bb-auth is
+# the daemon binary, so the dir cannot nest there). No interpreter on the
+# sudo path.
+set(BB_AUTH_SHIM_DIR "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-shims")
+set(BB_AUTH_INTENT_HOOK_PATH "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-intent-hook")
+set(BB_AUTH_INTEGRATIONS_DIR "${CMAKE_INSTALL_FULL_DATADIR}/bb-auth/integrations")
+qt_add_executable(bb-auth-agent
+        integrations/agent/main.cpp
+        integrations/agent/Common.cpp
+        integrations/agent/Translate.cpp
+        integrations/agent/OrderedJson.cpp
+        integrations/agent/Hook.cpp
+        integrations/agent/Aisudo.cpp
+        integrations/agent/Installer.cpp
+        src/common/ProcAgent.cpp)
+target_link_libraries(bb-auth-agent PRIVATE Qt6::Core)
+target_compile_definitions(bb-auth-agent PRIVATE
+        BB_AUTH_VERSION="${VER}"
+        BB_AUTH_SHIM_DIR="${BB_AUTH_SHIM_DIR}"
+        BB_AUTH_INTENT_HOOK_PATH="${BB_AUTH_INTENT_HOOK_PATH}"
+        BB_AUTH_INTEGRATIONS_DIR="${BB_AUTH_INTEGRATIONS_DIR}")
+install(TARGETS bb-auth-agent
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
 
-# opencode plugin (drop-in JS) + integration docs — shipped under datadir for
-# users to wire into their harness configs.
+# Build-tree names so tests exercise the argv0 dispatch exactly as installed.
+foreach(_bb_auth_name bb-auth-intent-hook aisudo bb-auth-agents)
+    add_custom_command(TARGET bb-auth-agent POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E create_symlink bb-auth-agent ${CMAKE_BINARY_DIR}/${_bb_auth_name})
+endforeach()
+
+# Installed names. Relative targets keep every link correct under any prefix.
+file(RELATIVE_PATH BB_AUTH_BIN_TO_AGENT
+     "/${CMAKE_INSTALL_BINDIR}" "/${CMAKE_INSTALL_LIBEXECDIR}/bb-auth-agent")
+install(CODE "
+    if(\"${CMAKE_INSTALL_LIBEXECDIR}\" MATCHES \"^/\")
+        set(_libexec \"\$ENV{DESTDIR}${CMAKE_INSTALL_LIBEXECDIR}\")
+        set(_bindir \"\$ENV{DESTDIR}${CMAKE_INSTALL_BINDIR}\")
+    else()
+        set(_libexec \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}\")
+        set(_bindir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}\")
+    endif()
+    file(MAKE_DIRECTORY \"\${_libexec}/bb-auth-shims\" \"\${_bindir}\")
+    file(REMOVE \"\${_libexec}/bb-auth-intent-hook\" \"\${_bindir}/aisudo\" \"\${_bindir}/bb-auth-agents\")
+    file(CREATE_LINK bb-auth-agent \"\${_libexec}/bb-auth-intent-hook\" SYMBOLIC)
+    file(CREATE_LINK \"${BB_AUTH_BIN_TO_AGENT}\" \"\${_bindir}/aisudo\" SYMBOLIC)
+    file(CREATE_LINK \"${BB_AUTH_BIN_TO_AGENT}\" \"\${_bindir}/bb-auth-agents\" SYMBOLIC)
+    foreach(_tool sudo doas pkexec)
+        file(REMOVE \"\${_libexec}/bb-auth-shims/\${_tool}\")
+        file(CREATE_LINK ../bb-auth-agent \"\${_libexec}/bb-auth-shims/\${_tool}\" SYMBOLIC)
+    endforeach()
+")
+
+# opencode plugin, pi extension, and integration docs — runtime drop-ins the
+# installer symlinks into each harness.
 install(FILES integrations/opencode/bb-auth-plugin.js
         DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth/integrations/opencode)
 install(FILES integrations/pi/bb-auth-extension.ts
         DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth/integrations/pi)
-install(FILES integrations/hooks/README.md
+install(FILES integrations/agent/README.md
         DESTINATION ${CMAKE_INSTALL_DATADIR}/bb-auth/integrations)
-
-# Agent CLI — universal intent declaration; any agent calls this directly.
-# Also installs PATH shims (sudo/doas/pkexec → this script) under
-# <libexec>/bb-auth-shims for opt-in environmental supervision: under a
-# recognized agent ancestor the shim declares intent and rewrites a clean
-# sudo/doas to pkexec; for humans it transparently execs the real binary.
-# (nb: <libexec>/bb-auth is the daemon *binary*, so the dir cannot nest there.)
-set(BB_AUTH_SHIM_DIR "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-shims")
-# Relative link target keeps the shims correct under any install prefix
-# (e.g. libexec→bin is ../../bin from <libexec>/bb-auth-shims).
-file(RELATIVE_PATH BB_AUTH_SHIM_LINK_TARGET
-     "/${CMAKE_INSTALL_LIBEXECDIR}/bb-auth-shims"
-     "/${CMAKE_INSTALL_BINDIR}/aisudo")
-configure_file(integrations/agent-cli/aisudo.in aisudo @ONLY)
-install(PROGRAMS ${CMAKE_BINARY_DIR}/aisudo
-        DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-# Harness installer — wires the hook/plugins into each agent's config
-# (status/install/uninstall). Paths are baked in at configure time.
-set(BB_AUTH_INTENT_HOOK_PATH "${CMAKE_INSTALL_FULL_LIBEXECDIR}/bb-auth-intent-hook")
-set(BB_AUTH_INTEGRATIONS_DIR "${CMAKE_INSTALL_FULL_DATADIR}/bb-auth/integrations")
-set(BB_AUTH_VERSION_STRING "${VER}")
-configure_file(integrations/agents/bb-auth-agents.in bb-auth-agents @ONLY)
-install(PROGRAMS ${CMAKE_BINARY_DIR}/bb-auth-agents
-        DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-install(CODE "
-    if(\"${CMAKE_INSTALL_LIBEXECDIR}\" MATCHES \"^/\")
-        set(_bb_auth_shim_dir \"\$ENV{DESTDIR}${CMAKE_INSTALL_LIBEXECDIR}/bb-auth-shims\")
-    else()
-        set(_bb_auth_shim_dir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/bb-auth-shims\")
-    endif()
-    file(MAKE_DIRECTORY \"\${_bb_auth_shim_dir}\")
-    foreach(_bb_auth_tool sudo doas pkexec)
-        execute_process(
-            COMMAND \${CMAKE_COMMAND} -E create_symlink
-                \"${BB_AUTH_SHIM_LINK_TARGET}\"
-                \"\${_bb_auth_shim_dir}/\${_bb_auth_tool}\"
-        )
-    endforeach()
-")
 
 qt_add_executable(bb-auth-fallback
     src/fallback/main.cpp
@@ -257,6 +260,7 @@ qt_add_executable(bb-auth-tests
     src/core/Session.cpp
     src/core/Session.hpp
     src/core/RequestContext.cpp
+    src/common/ProcAgent.cpp
     src/core/RequestContext.hpp
     src/core/agent/EventQueue.cpp
     src/core/agent/EventQueue.hpp
@@ -309,7 +313,8 @@ add_test(NAME bb-auth-tests COMMAND bb-auth-tests)
 set_tests_properties(bb-auth-tests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
-# PATH-shim / declare CLI tests (python3; no extra deps)
+# Agent tooling tests: python3 drives the built binary and plugins as
+# subprocesses (a check-time dependency only; nothing installed needs it).
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
     add_test(NAME aisudo-shim

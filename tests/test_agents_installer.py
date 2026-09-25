@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for bb-auth-agents (harness installer).
 
-Runs the script against a throwaway HOME with an empty PATH so the real
+Runs the binary against a throwaway HOME with an empty PATH so the real
 machine's harness configs and binaries are never seen or touched.
 """
 from __future__ import annotations
@@ -14,10 +14,9 @@ import tempfile
 import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.environ.get(
-    "BB_AUTH_AGENTS",
-    os.path.join(_HERE, "..", "integrations", "agents", "bb-auth-agents.in"),
-)
+# The bb-auth-agent binary under its `bb-auth-agents` name (ctest passes the
+# build-tree symlink).
+SCRIPT = os.path.abspath(os.environ.get("BB_AUTH_AGENTS", "bb-auth-agents"))
 INTEGRATIONS = os.path.normpath(os.path.join(_HERE, "..", "integrations"))
 HOOK = "/opt/bb/libexec/bb-auth-intent-hook"
 
@@ -49,7 +48,7 @@ class InstallerCase(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_agents(self, *args):
-        return subprocess.run([sys.executable, SCRIPT, *args], env=self.env,
+        return subprocess.run([SCRIPT, *args], env=self.env,
                               capture_output=True, text=True, timeout=30)
 
     def write(self, rel, data):
@@ -188,6 +187,39 @@ class InstallerCase(unittest.TestCase):
         r = self.run_agents("install", "claude")
         self.assertEqual(r.returncode, 1)
         self.assertEqual(self.read(".claude/settings.json"), "{not json")
+
+    def test_config_round_trips_byte_for_byte(self):
+        # Order-preserving JSON: install + uninstall must give back the exact
+        # bytes of a conventionally formatted file — key order, unicode,
+        # escapes, number lexemes, and empty containers included.
+        original = {
+            "zeta": 1, "alpha": {"nested": [], "empty": {}, "list": [1.5e10, -0.25, 12345678901234567890]},
+            "text": "caf\u00e9 \u2028 tab\tquote\" backslash\\ ctrl\u0001 emoji \U0001F512",
+            "flags": [True, False, None],
+            "hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "x"}]}]},
+        }
+        path = os.path.join(self.home, ".claude/settings.json")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w") as f:
+            f.write(json.dumps(original, indent=2, ensure_ascii=False) + "\n")
+        with open(path, "rb") as f:
+            before = f.read()
+        self.assertEqual(self.run_agents("install", "claude").returncode, 0)
+        data = json.loads(self.read(".claude/settings.json"))
+        self.assertEqual(list(data)[:2], ["zeta", "alpha"])  # not re-sorted
+        self.assertEqual(self.run_agents("uninstall", "claude").returncode, 0)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), before)
+
+    def test_rejects_non_json_configs(self):
+        for bad in ('{"a": 1,}', '{"a": 1} // comment', "[1, 2", '{"a": 01}', '{"a": "\\x"}'):
+            with self.subTest(bad=bad):
+                path = os.path.join(self.home, ".claude/settings.json")
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as f:
+                    f.write(bad)
+                self.assertEqual(self.run_agents("install", "claude").returncode, 1)
+                self.assertEqual(self.read(".claude/settings.json"), bad)
 
     def test_status_reports_hook_daemon_polkit(self):
         out = self.run_agents("status").stdout

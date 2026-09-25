@@ -18,10 +18,10 @@ makedepends=(
     'git'
     'cmake'
 )
+checkdepends=('python')
 optdepends=(
     'fprintd: fingerprint via the polkit PAM stack'
     'pam-u2f: FIDO2 security keys via the polkit PAM stack'
-    'python: aisudo, PATH shims, and the bb-auth-agents harness installer'
 )
 provides=('bb-auth')
 conflicts=('bb-auth')

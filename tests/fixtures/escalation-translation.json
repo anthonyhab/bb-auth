@@ -1,5 +1,5 @@
 {
-  "_comment": "Shared sudo/doas -> pkexec translation vectors. Every translator (bb-auth-intent-hook, aisudo _translate, pi extension, opencode plugin) is tested against these rows; rewrite null means the command must run unchanged. See lat.md/agent-intent.md#Escalation translation.",
+  "_comment": "Shared sudo/doas -> pkexec translation vectors. Every translator (bb-auth-agent's argv- and string-level forms, pi extension, opencode plugin) is tested against these rows; rewrite null means the command must run unchanged. See lat.md/agent-intent.md#Escalation translation.",
   "rows": [
     {"command": "sudo pacman -Syu", "rewrite": "pkexec pacman -Syu"},
     {"command": "doas id", "rewrite": "pkexec id"},

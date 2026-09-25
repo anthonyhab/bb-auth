@@ -36,6 +36,10 @@ the bb-auth prompt — and one command wires it into every supported harness.
   `autoMode` (with `$defaults` preserved).
 - **`aisudo`** voluntary CLI and agent-gated `sudo`/`doas`/`pkexec` PATH shims
   for hookless harnesses; one shared translation subset (`-n`, `-u`, `--`).
+- **One compiled binary, no Python.** `bb-auth-agent` (Qt6::Core) is the hook,
+  `aisudo`, the shims, and `bb-auth-agents`, selected by `argv[0]`; agent
+  detection shares the daemon's code. Config edits preserve key order and
+  formatting.
 - **On-demand providers** (`"resident": false`): launched per session, exit
   when idle. The omarchy prompt uses it.
 - Forgejo CI and tag-driven release pipeline; stable AUR `PKGBUILD` pinned to

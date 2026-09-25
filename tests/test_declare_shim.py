@@ -1,50 +1,27 @@
 #!/usr/bin/env python3
 """Tests for the aisudo CLI and shim mode (PATH interception of sudo/doas/pkexec).
 
-Runs the real script through symlinks named sudo/doas/pkexec under a staged
+Runs the real bb-auth-agent binary through symlinks named sudo/doas/pkexec under a staged
 PATH, with stub "real" binaries logging their argv and a stub daemon socket
 recording declarations. The agent-ancestor path is exercised via a parent
 process whose cmdline contains a known agent signature.
 """
 from __future__ import annotations
 
-import importlib.util
-from importlib.machinery import SourceFileLoader
 import json
 import os
-import shutil
+import shlex
 import socket
 import subprocess
-import sys
 import tempfile
 import threading
 import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.environ.get(
-    "AISUDO",
-    os.path.join(_HERE, "..", "integrations", "agent-cli", "aisudo.in"),
-)
-
-
-def _load_module():
-    loader = SourceFileLoader("aisudo", SCRIPT)
-    spec = importlib.util.spec_from_file_location("aisudo", SCRIPT, loader=loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-def setUpModule():
-    # configure_file does not preserve the exec bit in the build tree; the
-    # installed copy gets it via install(PROGRAMS). Stage an executable copy
-    # instead of mutating the source file's mode.
-    global SCRIPT
-    if not os.access(SCRIPT, os.X_OK):
-        staged = os.path.join(tempfile.mkdtemp(prefix="aisudo-"), "aisudo")
-        shutil.copyfile(SCRIPT, staged)
-        os.chmod(staged, 0o755)
-        SCRIPT = staged
+# The bb-auth-agent binary under its `aisudo` name (ctest passes the build-tree
+# symlink). Symlinks named sudo/doas/pkexec select shim mode via argv[0].
+SCRIPT = os.path.abspath(os.environ.get("AISUDO", "aisudo"))
+FIXTURE = os.path.join(_HERE, "fixtures", "escalation-translation.json")
 
 
 class FakeDaemon(threading.Thread):
@@ -154,22 +131,16 @@ class ShimCase(unittest.TestCase):
             return f.read()
 
     def run_cmd_human(self, argv):
-        """Run the shim with agent detection stubbed off — deterministic human
+        """Run the shim with agent detection pinned off — deterministic human
         passthrough even when the ambient test process sits under an agent
         (e.g. agent-driven CI)."""
-        stub = (
-            "import importlib.util,os,sys;"
-            "from importlib.machinery import SourceFileLoader;"
-            "p=os.environ['AISUDO'];"
-            "s=importlib.util.spec_from_file_location('m',p,loader=SourceFileLoader('m',p));"
-            "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
-            "m._detect_agent=lambda:None;"
-            "m._shim_mode(sys.argv[1],sys.argv[2:])"
-        )
-        return subprocess.run(
-            [sys.executable, "-c", stub] + argv,
-            env={**self.env, "AISUDO": SCRIPT},
-            timeout=15, capture_output=True, text=True)
+        return subprocess.run(argv, env={**self.env, "BB_AUTH_TEST_ASSUME_HUMAN": "1"},
+                              timeout=15, capture_output=True, text=True)
+
+    def dry_run(self, argv):
+        r = self.run_cli(["--dry-run", "--"] + argv, daemon=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
 
     # --- shim behavior ---
 
@@ -336,92 +307,30 @@ class ShimCase(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertEqual(json.loads(r.stdout)["exec"], ["pkexec", "id"])
 
-    # --- unit-level ---
+    # --- translation (via --dry-run: no daemon, no exec) ---
 
     def test_translate_rules(self):
-        m = _load_module()
-        self.assertEqual(m._translate("sudo", ["pacman", "-Syu"]),
-                         (["pkexec", "pacman", "-Syu"], ""))
-        self.assertEqual(m._translate("doas", ["id"]), (["pkexec", "id"], ""))
-        # Supported sudo subset: -n drops, -u/--user map, -- consumed.
-        self.assertEqual(m._translate("sudo", ["-n", "make", "install"]),
-                         (["pkexec", "make", "install"], "dropped -n: GUI prompt replaces stdin auth"))
-        self.assertEqual(m._translate("sudo", ["-u", "nobody", "id"]),
-                         (["pkexec", "--user", "nobody", "id"], ""))
-        self.assertEqual(m._translate("sudo", ["-unobody", "id"]),
-                         (["pkexec", "--user", "nobody", "id"], ""))
-        self.assertEqual(m._translate("sudo", ["--user=nobody", "id"]),
-                         (["pkexec", "--user", "nobody", "id"], ""))
-        self.assertEqual(m._translate("sudo", ["--", "id"]), (["pkexec", "id"], ""))
-        self.assertEqual(m._translate("sudo", ["-n", "-u", "nobody", "id"]),
-                         (["pkexec", "--user", "nobody", "id"],
-                          "dropped -n: GUI prompt replaces stdin auth"))
-        # Probe-only and unsupported forms decline.
-        self.assertIsNone(m._translate("sudo", [])[0])
-        self.assertIsNone(m._translate("sudo", ["-n"])[0])
-        self.assertIsNone(m._translate("sudo", ["-nv"])[0])
-        self.assertIsNone(m._translate("sudo", ["-E", "id"])[0])
-        self.assertIsNone(m._translate("sudo", ["-i"])[0])
-        self.assertIsNone(m._translate("sudo", ["FOO=1", "id"])[0])
-        self.assertIsNone(m._translate("pkexec", ["id"])[0])
-        self.assertIsNone(m._translate("sudo", ["-u"])[0])
-        self.assertIsNone(m._translate("sudo", ["-u", "bad;user", "id"])[0])
-        # Shell metacharacters in ANY argument must decline — parity with the
-        # harness hook's refusal class.
-        self.assertIsNone(m._translate("sudo", ["sh", "-c", "a|b"])[0])
-        self.assertIsNone(m._translate("sudo", ["a|b"])[0])
-        self.assertIsNone(m._translate("sudo", ["x", "&&", "y"])[0])
-        self.assertIsNone(m._translate("sudo", ["$(whoami)"])[0])
-        self.assertIsNone(m._translate("sudo", ["cmd", "`id`"])[0])
-        self.assertIsNone(m._translate("sudo", ["cmd", ">out"])[0])
-        # Options after the command are the command's own args.
-        self.assertEqual(m._translate("sudo", ["cmd", "-n", "x"])[0],
-                         ["pkexec", "cmd", "-n", "x"])
+        self.assertEqual(self.dry_run(["sudo", "pacman", "-Syu"])["exec"], ["pkexec", "pacman", "-Syu"])
+        plan = self.dry_run(["sudo", "-n", "-u", "nobody", "id"])
+        self.assertEqual(plan["exec"], ["pkexec", "--user", "nobody", "id"])
+        self.assertEqual(plan["note"], "dropped -n: GUI prompt replaces stdin auth")
+        # Declines keep the original launcher and say why.
+        plan = self.dry_run(["sudo", "-E", "id"])
+        self.assertEqual(plan["exec"], ["sudo", "-E", "id"])
+        self.assertIn("not translatable", plan["note"])
+        self.assertNotIn("fallback_exec", plan)
+        self.assertIn("probe", self.dry_run(["sudo", "-n"])["note"])
+        self.assertEqual(self.dry_run(["sudo", "cmd", "-n", "x"])["exec"], ["pkexec", "cmd", "-n", "x"])
 
+    # @lat: [[tests#Agent handoff#Shared translation vectors]]
     def test_shared_translation_vectors(self):
-        import shlex
-        m = _load_module()
-        fixture = os.path.join(_HERE, "fixtures", "escalation-translation.json")
-        with open(fixture) as f:
+        with open(FIXTURE) as f:
             rows = json.load(f)["rows"]
         for row in rows:
             with self.subTest(command=row["command"]):
                 argv = shlex.split(row["command"])
-                got = m._translate(argv[0], argv[1:])[0] if argv else None
-                self.assertEqual(got, shlex.split(row["rewrite"]) if row["rewrite"] else None)
-
-    def test_agent_token_matching(self):
-        m = _load_module()
-        # Exact basenames, path segments, and script-entry forms match.
-        self.assertEqual(m._agent_from_token("/opt/claude-code/cli.js"), "claude-code")
-        self.assertEqual(m._agent_from_token("/usr/lib/node_modules/@google/gemini-cli/x.js"), "gemini-cli")
-        self.assertEqual(m._agent_from_token("agy"), "gemini-cli")
-        self.assertEqual(m._agent_from_token("codex.js"), "codex")
-        # pi matches on its npm package dir, never the bare `pi` binary name.
-        self.assertEqual(m._agent_from_token(
-            "/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"), "pi")
-        self.assertIsNone(m._agent_from_token("pi"))
-        self.assertIsNone(m._agent_from_token("/usr/bin/pi"))
-        # Lookalikes must not match.
-        self.assertIsNone(m._agent_from_token("node"))
-        self.assertIsNone(m._agent_from_token("devin-notes.md"))
-        self.assertIsNone(m._agent_from_token("strategy"))
-        self.assertIsNone(m._agent_from_token("agyx"))
-
-    def test_real_binary_skips_self(self):
-        m = _load_module()
-        env_path = os.pathsep.join([self.shimdir, self.realdir])
-        old = os.environ.get("PATH")
-        os.environ["PATH"] = env_path
-        try:
-            real = m._real_binary("sudo")
-            self.assertIsNotNone(real)
-            self.assertEqual(os.path.dirname(os.path.abspath(real)), self.realdir)
-        finally:
-            if old is None:
-                del os.environ["PATH"]
-            else:
-                os.environ["PATH"] = old
+                want = shlex.split(row["rewrite"]) if row["rewrite"] else argv
+                self.assertEqual(self.dry_run(argv)["exec"], want)
 
     def test_print_shim_dir(self):
         out = subprocess.run([SCRIPT, "--print-shim-dir"], capture_output=True, text=True, timeout=15)
