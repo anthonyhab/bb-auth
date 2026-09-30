@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE
 #include "pinentry.hpp"
 
 #include "../common/Constants.hpp"
@@ -12,6 +13,10 @@
 
 #include <cstring>
 #include <iostream>
+
+#include <errno.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <print>
 #include <string>
 #include <QStringView>
@@ -36,27 +41,6 @@ namespace {
                 }
             }
             result += input[i];
-        }
-        return result;
-    }
-
-    // Assuan percent-encoding for data response
-    QString assuanEncode(const QString& input) {
-        QString result;
-        result.reserve(input.size() * 3);
-
-        static const char hexChars[] = "0123456789ABCDEF";
-
-        for (const QChar& ch : input) {
-            char c = ch.toLatin1();
-            if (c == '%' || c == '\n' || c == '\r') {
-                result.append('%');
-                unsigned char uc = static_cast<unsigned char>(c);
-                result.append(hexChars[(uc >> 4) & 0xF]);
-                result.append(hexChars[uc & 0xF]);
-            } else {
-                result.append(ch);
-            }
         }
         return result;
     }
@@ -180,8 +164,52 @@ namespace {
         }
 
         void sendData(const QString& data) {
-            std::cout << "D " << assuanEncode(data).toStdString() << "\n";
+            // Ensure any buffered data in std::cout is sent first to maintain protocol order
             std::cout.flush();
+
+            // Refuse to send data if stdout is redirected to a regular file
+            struct stat st;
+            if (fstat(STDOUT_FILENO, &st) == 0 && S_ISREG(st.st_mode)) {
+                return;
+            }
+
+            QByteArray raw = data.toUtf8();
+            // Max size: "D " + (3 * size for encoding) + "\n"
+            QByteArray encoded;
+            encoded.reserve(raw.size() * 3 + 3);
+            encoded.append("D ");
+
+            static const char hexChars[] = "0123456789ABCDEF";
+
+            for (char c : raw) {
+                auto uc = static_cast<unsigned char>(c);
+                // Assuan encoding: escape %, control chars, and non-ASCII
+                if (uc == '%' || uc <= 0x20 || uc >= 0x7F) {
+                    encoded.append('%');
+                    encoded.append(hexChars[(uc >> 4) & 0xF]);
+                    encoded.append(hexChars[uc & 0xF]);
+                } else {
+                    encoded.append(c);
+                }
+            }
+            encoded.append('\n');
+
+            // Direct write to bypass std::cout buffering
+            const char* ptr = encoded.constData();
+            size_t      remaining = encoded.size();
+            while (remaining > 0) {
+                ssize_t written = write(STDOUT_FILENO, ptr, remaining);
+                if (written < 0) {
+                    if (errno == EINTR) continue;
+                    break;
+                }
+                ptr += written;
+                remaining -= written;
+            }
+
+            // Securely wipe buffers
+            explicit_bzero(raw.data(), raw.size());
+            explicit_bzero(encoded.data(), encoded.size());
         }
 
         bool handleCommand(const QString& line) {
