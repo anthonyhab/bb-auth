@@ -52,6 +52,7 @@ compile_commands.json
 .codex
 .devin
 .gemini
+.agents
 
 lat.md/.cache/
 __pycache__/
