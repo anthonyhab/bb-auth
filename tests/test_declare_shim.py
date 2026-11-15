@@ -154,7 +154,7 @@ class ShimCase(unittest.TestCase):
     def test_agent_sudo_rewrites_and_declares(self):
         self.start_daemon()
         self.run_cmd(["sudo", "clean", "cache"], via_agent=True)
-        self.assertIn("pkexec clean cache", self.exec_log())
+        self.assertIn("pkexec --keep-cwd clean cache", self.exec_log())
         self.assertNotIn("sudo clean cache", self.exec_log())
         self.assertEqual(len(self.daemon.payloads), 1)
         p = self.daemon.payloads[0]
@@ -166,14 +166,14 @@ class ShimCase(unittest.TestCase):
     def test_agent_sudo_u_maps_to_pkexec_user(self):
         self.start_daemon()
         self.run_cmd(["sudo", "-u", "nobody", "id"], via_agent=True)
-        self.assertIn("pkexec --user nobody id", self.exec_log())
+        self.assertIn("pkexec --keep-cwd --user nobody id", self.exec_log())
         self.assertNotIn("sudo -u nobody id", self.exec_log())
         self.assertEqual(len(self.daemon.payloads), 1)
 
     def test_agent_sudo_n_translates(self):
         self.start_daemon()
         self.run_cmd(["sudo", "-n", "make", "install"], via_agent=True)
-        self.assertIn("pkexec make install", self.exec_log())
+        self.assertIn("pkexec --keep-cwd make install", self.exec_log())
         self.assertNotIn("sudo -n", self.exec_log())
         self.assertEqual(len(self.daemon.payloads), 1)
 
@@ -200,7 +200,7 @@ class ShimCase(unittest.TestCase):
     def test_agent_doas_rewrites(self):
         self.start_daemon()
         self.run_cmd(["doas", "ls", "/root"], via_agent=True)
-        self.assertIn("pkexec ls /root", self.exec_log())
+        self.assertIn("pkexec --keep-cwd ls /root", self.exec_log())
         self.assertEqual(len(self.daemon.payloads), 1)
         self.assertEqual(self.daemon.payloads[0]["channel"], "shim")
 
@@ -214,7 +214,7 @@ class ShimCase(unittest.TestCase):
 
     def test_cli_bare_command_normalizes_to_sudo(self):
         r = self.run_cli(["make", "install"])
-        self.assertIn("pkexec make install", self.exec_log())
+        self.assertIn("pkexec --keep-cwd make install", self.exec_log())
         p = self.daemon.payloads[0]
         self.assertEqual(p["command"], "sudo make install")
         self.assertEqual(p["reason"], "sudo make install")
@@ -222,16 +222,16 @@ class ShimCase(unittest.TestCase):
 
     def test_cli_sudo_n_translates(self):
         r = self.run_cli(["sudo", "-n", "make", "install"])
-        self.assertIn("pkexec make install", self.exec_log())
+        self.assertIn("pkexec --keep-cwd make install", self.exec_log())
         self.assertIn("dropped -n", r.stderr)
 
     def test_cli_bare_n_flag(self):
         r = self.run_cli(["-n", "make", "install"])
-        self.assertIn("pkexec make install", self.exec_log())
+        self.assertIn("pkexec --keep-cwd make install", self.exec_log())
 
     def test_cli_sudo_u_maps(self):
         self.run_cli(["sudo", "-u", "nobody", "id"])
-        self.assertIn("pkexec --user nobody id", self.exec_log())
+        self.assertIn("pkexec --keep-cwd --user nobody id", self.exec_log())
 
     def test_cli_decline_notes_reason(self):
         r = self.run_cli(["sudo", "-E", "id"])
@@ -251,20 +251,20 @@ class ShimCase(unittest.TestCase):
     def test_cli_unbound_daemon_still_translates(self):
         self.start_daemon(bound=False)
         self.run_cli(["sudo", "id"], daemon=False)
-        self.assertIn("pkexec id", self.exec_log())
+        self.assertIn("pkexec --keep-cwd id", self.exec_log())
 
     def test_cli_json_inline(self):
         self.run_cli(["--json", '{"argv": ["sudo", "id"], "reason": "why"}'])
-        self.assertIn("pkexec id", self.exec_log())
+        self.assertIn("pkexec --keep-cwd id", self.exec_log())
         self.assertEqual(self.daemon.payloads[0]["reason"], "why")
 
     def test_cli_json_command_string(self):
         self.run_cli(["--json", '{"command": "sudo make install"}'])
-        self.assertIn("pkexec make install", self.exec_log())
+        self.assertIn("pkexec --keep-cwd make install", self.exec_log())
 
     def test_cli_json_stdin(self):
         self.run_cli(["--json", "-"], stdin_text='{"argv": ["sudo", "id"]}')
-        self.assertIn("pkexec id", self.exec_log())
+        self.assertIn("pkexec --keep-cwd id", self.exec_log())
 
     def test_cli_json_unknown_key_corrective(self):
         r = self.run_cli(["--json", '{"args": ["sudo", "id"]}'])
@@ -282,7 +282,7 @@ class ShimCase(unittest.TestCase):
                          daemon=False)
         self.assertEqual(r.returncode, 0)
         plan = json.loads(r.stdout)
-        self.assertEqual(plan["exec"], ["pkexec", "make", "install"])
+        self.assertEqual(plan["exec"], ["pkexec", "--keep-cwd", "make", "install"])
         self.assertEqual(plan["fallback_exec"], ["sudo", "-n", "make", "install"])
         self.assertEqual(plan["declare"]["command"], "sudo -n make install")
         self.assertIn("dropped -n", plan["note"])
@@ -305,14 +305,14 @@ class ShimCase(unittest.TestCase):
         r = subprocess.run([link, "--dry-run", "id"], env=self.env,
                            timeout=15, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0)
-        self.assertEqual(json.loads(r.stdout)["exec"], ["pkexec", "id"])
+        self.assertEqual(json.loads(r.stdout)["exec"], ["pkexec", "--keep-cwd", "id"])
 
     # --- translation (via --dry-run: no daemon, no exec) ---
 
     def test_translate_rules(self):
-        self.assertEqual(self.dry_run(["sudo", "pacman", "-Syu"])["exec"], ["pkexec", "pacman", "-Syu"])
+        self.assertEqual(self.dry_run(["sudo", "pacman", "-Syu"])["exec"], ["pkexec", "--keep-cwd", "pacman", "-Syu"])
         plan = self.dry_run(["sudo", "-n", "-u", "nobody", "id"])
-        self.assertEqual(plan["exec"], ["pkexec", "--user", "nobody", "id"])
+        self.assertEqual(plan["exec"], ["pkexec", "--keep-cwd", "--user", "nobody", "id"])
         self.assertEqual(plan["note"], "dropped -n: GUI prompt replaces stdin auth")
         # Declines keep the original launcher and say why.
         plan = self.dry_run(["sudo", "-E", "id"])
@@ -320,7 +320,7 @@ class ShimCase(unittest.TestCase):
         self.assertIn("not translatable", plan["note"])
         self.assertNotIn("fallback_exec", plan)
         self.assertIn("probe", self.dry_run(["sudo", "-n"])["note"])
-        self.assertEqual(self.dry_run(["sudo", "cmd", "-n", "x"])["exec"], ["pkexec", "cmd", "-n", "x"])
+        self.assertEqual(self.dry_run(["sudo", "cmd", "-n", "x"])["exec"], ["pkexec", "--keep-cwd", "cmd", "-n", "x"])
 
     # @lat: [[tests#Agent handoff#Shared translation vectors]]
     def test_shared_translation_vectors(self):

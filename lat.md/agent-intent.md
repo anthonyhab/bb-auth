@@ -91,6 +91,7 @@ For Claude Code only (no `turn_id`), the hook also handles `PostToolUse`/`PostTo
 
 `translateArgv` (`integrations/agent/Translate.cpp`) is the `sudo`/`doas` → `pkexec` translator shared by the CLI and the PATH shim; it returns the rewritten argv or a decline reason.
 
+- Every rewrite carries `--keep-cwd`: pkexec otherwise runs the program in the target user's home, so `sudo rm -rf build` would act on `/root/build` and `sudo pacman -U ./x.pkg.tar.zst` would miss its file. sudo keeps the caller's directory; the rewrite must too.
 - Supported option subset: `-n`/`--non-interactive` drops (the supervised GUI prompt *is* the non-interactive path — `sudo -n CMD` previously failed guaranteed under agents), `-u`/`--user` maps to `pkexec --user`, `--` is consumed.
 - Everything else declines — other options, `VAR=val` env assignments, shell metacharacters in any argument, and probe-only invocations (options but no command, e.g. `sudo -nv`) — running via the original launcher unchanged.
 - The CLI surfaces the translation or decline reason on stderr; the shim stays silent (passthrough must not leak noise into agent transcripts).
@@ -111,9 +112,22 @@ The production prompt renders, for agent requests only: agent glyph + resolved r
 - An agent request with **no declared reason** renders an explicit `No reason declared by the agent.` line — a missing reason reads as a signal, not an absence (`PromptDisplayModel::agentRequestor` drives the state).
 - The band **never** shows the declared `command`: correlation is by ancestry, not command match, so the string can diverge from what polkit actually authorizes — rendering it would manufacture false confidence.
 - What is authorized stays with polkit's own message; the band lives in the prompt layer ([[architecture#Fallback UI]] `prompt/` extractors).
+- The command a prompt *may* show is `context.request.argv` ([[agent-intent#Verified request facts]]): what pkexec itself reported, verified against its argv. The Omarchy prompt (`habibe.bb-auth` in omarchy-plugins) builds its per-command preview from that and runs its probes as the user; the declared `command` stays unshown.
 
 ## Display-only trust boundary
 
 Intent never gates the decision: a same-UID agent can declare a benign reason for a hostile command, so `reason`/`declaredAgent` carry zero authorization weight — allow/deny stays with polkit and OS-resolved identity.
 
 The hook **fails open**: malformed input, unreachable daemon, or any error leaves the command unchanged.
+
+## Verified request facts
+
+`buildRequestFacts` (`src/core/RequestFacts.cpp`) gives the prompt what a polkit request will actually do, so it can show a preview built from facts rather than from the agent's claim.
+
+- Trusted only from a privileged caller: polkit details are whatever the calling process sent. Privileged means euid 0 or `CAP_SETUID` in `CapEff`; the unit's sandbox (`ProtectSystem` and friends) puts the daemon in a user namespace where root reads as uid 65534, while capability sets stay unmapped.
+- For `org.freedesktop.policykit.exec`, the caller's `/proc` argv is parsed with pkexec's own option loop and must reproduce pkexec's `command_line`: PROGRAM as written when absolute, PATH-resolved otherwise, arguments joined by single spaces. `program` is pkexec's `realpath()`; `argv[0]` keeps the called name for multi-call binaries.
+- polkit 127 forwards only `polkit.*` details to agents, so `program` and `command_line` usually never arrive. The command line is then checked against the message, `Authentication is needed to run `$(cmdline_short)' as ...`: the rebuilt command line must shorten exactly as pkexec does (over 80 bytes: first 38, ` ... `, last 37), a PATH-resolved PROGRAM is read off its first word, the target user off `as the super user` or `as user Gecos (login)`, and `program` falls back to the resolved path. A translated message yields nothing.
+- The working directory comes from the requester (`--keep-cwd`) or the target's home, matching where pkexec runs the program. A setuid pkexec's own `/proc/<pid>/cwd` is unreadable, so the requester's is the best available and is labelled `cwdFrom: "requester"`.
+- Other root mechanisms (systemd's `manage-units` and the like) contribute their non-`polkit.*` details.
+- Display only, like intent: polkit makes the decision.
+

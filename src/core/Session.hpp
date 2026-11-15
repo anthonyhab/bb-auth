@@ -61,6 +61,9 @@ namespace bb {
             QString     actionId;
             QString     user;
             QJsonObject details;
+            // What the request will do, from the root mechanism that asked
+            // (RequestFacts); empty when that could not be verified.
+            QJsonObject request;
 
             // Keyring-specific
             QString keyringName;

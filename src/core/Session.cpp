@@ -114,6 +114,9 @@ namespace bb {
                 if (!m_context.details.isEmpty()) {
                     ctx["details"] = m_context.details;
                 }
+                if (!m_context.request.isEmpty()) {
+                    ctx["request"] = m_context.request;
+                }
                 break;
 
             case Source::Keyring:

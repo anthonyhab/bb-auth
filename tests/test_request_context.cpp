@@ -1,4 +1,7 @@
 #include "../src/core/RequestContext.hpp"
+#include "../src/core/RequestFacts.hpp"
+#include <QDir>
+#include <QJsonArray>
 #include <QtTest/QtTest>
 #include <unistd.h>
 
@@ -13,6 +16,19 @@ class RequestContextTest : public QObject {
     void testAgentWinsOverAncestry();
     void testNonAgentNotFlagged();
     void testReadProcSelf();
+    void testFactsRequireRootCaller();
+    void testFactsPkexecKeepCwd();
+    void testFactsPkexecRunsInTargetHome();
+    void testFactsRejectMismatchedCommandLine();
+    void testFactsRejectNonPkexecCaller();
+    void testFactsCanonicalProgram();
+    void testFactsKeepEmptyArguments();
+    void testFactsBoundArgv();
+    void testFactsFromPkexecMessage();
+    void testFactsFromShortenedPkexecMessage();
+    void testFactsRejectMismatchedMessage();
+    void testFactsMechanismDetails();
+    void testReadProcArgvAndCwdSelf();
 };
 
 void RequestContextTest::testSpoofedProcessName() {
@@ -293,6 +309,178 @@ void RequestContextTest::testReadProcSelf() {
 }
 
 // We need an entry point.
+namespace {
+    ProcInfo pkexecCaller(const QStringList& argv, qint64 euid = 0) {
+        ProcInfo p;
+        p.pid  = 4242;
+        p.uid  = 1000;
+        p.euid = euid;
+        p.name = "pkexec";
+        p.argv = argv;
+        return p;
+    }
+
+    bb::RequestFactsInput execInput(const QStringList& argv, const QString& program, const QString& commandLine) {
+        bb::RequestFactsInput in;
+        in.actionId = "org.freedesktop.policykit.exec";
+        in.details  = {{"program", program}, {"command_line", commandLine}, {"user", "root"}, {"polkit.caller-pid", "4242"}};
+        in.caller   = pkexecCaller(argv);
+        in.subjectCwd  = "/home/u/proj";
+        in.homeForUser = [](const QString& user) { return user == "root" ? QString("/root") : QString(); };
+        return in;
+    }
+}
+
+void RequestContextTest::testFactsRequireRootCaller() {
+    // A user process can call polkit with any details it likes.
+    auto in   = execInput({"pkexec", "rm", "x"}, "/usr/bin/rm", "/usr/bin/rm x");
+    in.caller = pkexecCaller({"pkexec", "rm", "x"}, 1000);
+    QVERIFY(bb::buildRequestFacts(in).isEmpty());
+    in.caller.reset();
+    QVERIFY(bb::buildRequestFacts(in).isEmpty());
+}
+
+void RequestContextTest::testFactsPkexecKeepCwd() {
+    const auto facts = bb::buildRequestFacts(execInput({"/usr/bin/pkexec", "--keep-cwd", "rm", "-rf", "build"}, "/usr/bin/rm", "/usr/bin/rm -rf build"));
+    QCOMPARE(facts.value("kind").toString(), QString("exec"));
+    QCOMPARE(facts.value("program").toString(), QString("/usr/bin/rm"));
+    QCOMPARE(facts.value("argv").toArray(), QJsonArray({"/usr/bin/rm", "-rf", "build"}));
+    QCOMPARE(facts.value("user").toString(), QString("root"));
+    QCOMPARE(facts.value("cwd").toString(), QString("/home/u/proj"));
+    QCOMPARE(facts.value("cwdFrom").toString(), QString("requester"));
+    QVERIFY(!facts.contains("truncated"));
+}
+
+void RequestContextTest::testFactsPkexecRunsInTargetHome() {
+    const auto facts = bb::buildRequestFacts(execInput({"pkexec", "rm", "-rf", "build"}, "/usr/bin/rm", "/usr/bin/rm -rf build"));
+    QCOMPARE(facts.value("cwd").toString(), QString("/root"));
+    QCOMPARE(facts.value("cwdFrom").toString(), QString("target-home"));
+}
+
+void RequestContextTest::testFactsRejectMismatchedCommandLine() {
+    QVERIFY(bb::buildRequestFacts(execInput({"pkexec", "rm", "a"}, "/usr/bin/rm", "/usr/bin/rm b")).isEmpty());
+    QVERIFY(bb::buildRequestFacts(execInput({"pkexec", "rm", "a"}, "rm", "rm a")).isEmpty());
+    // A relative PROGRAM must resolve to a path ending in that name.
+    QVERIFY(bb::buildRequestFacts(execInput({"pkexec", "rm", "a"}, "/usr/bin/cp", "/usr/bin/cp a")).isEmpty());
+    // An absolute PROGRAM appears as written.
+    QVERIFY(bb::buildRequestFacts(execInput({"pkexec", "/bin/rm", "a"}, "/usr/bin/rm", "/usr/bin/rm a")).isEmpty());
+    QVERIFY(bb::buildRequestFacts(execInput({"pkexec", "--user"}, "/bin/bash", "/bin/bash")).isEmpty());
+    // Bare pkexec opens the target user's shell; pkexec reports it as PROGRAM.
+    const auto shell = bb::buildRequestFacts(execInput({"pkexec"}, "/usr/bin/bash", "/bin/bash"));
+    QCOMPARE(shell.value("argv").toArray(), QJsonArray({"/bin/bash"}));
+    QCOMPARE(shell.value("program").toString(), QString("/usr/bin/bash"));
+}
+
+void RequestContextTest::testFactsRejectNonPkexecCaller() {
+    QVERIFY(bb::buildRequestFacts(execInput({"sudo", "rm", "a"}, "/usr/bin/rm", "/usr/bin/rm a")).isEmpty());
+    QVERIFY(bb::buildRequestFacts(execInput({}, "/usr/bin/rm", "/usr/bin/rm a")).isEmpty());
+}
+
+void RequestContextTest::testFactsCanonicalProgram() {
+    // program is realpath()'d; argv keeps the name the program is called by
+    // (busybox-style multi-call binaries dispatch on it).
+    const auto facts = bb::buildRequestFacts(execInput({"pkexec", "/bin/rm", "x"}, "/usr/bin/busybox", "/bin/rm x"));
+    QCOMPARE(facts.value("program").toString(), QString("/usr/bin/busybox"));
+    QCOMPARE(facts.value("argv").toArray(), QJsonArray({"/bin/rm", "x"}));
+    const auto viaPath = bb::buildRequestFacts(execInput({"pkexec", "vi", "/etc/hosts"}, "/usr/bin/vim", "/usr/bin/vi /etc/hosts"));
+    QCOMPARE(viaPath.value("argv").toArray(), QJsonArray({"/usr/bin/vi", "/etc/hosts"}));
+}
+
+void RequestContextTest::testFactsKeepEmptyArguments() {
+    const auto facts = bb::buildRequestFacts(execInput({"pkexec", "--keep-cwd", "touch", "", "x"}, "/usr/bin/touch", "/usr/bin/touch  x"));
+    QCOMPARE(facts.value("argv").toArray(), QJsonArray({"/usr/bin/touch", "", "x"}));
+}
+
+void RequestContextTest::testFactsBoundArgv() {
+    QStringList argv{"pkexec", "rm"};
+    for (int i = 0; i < 300; ++i)
+        argv << QString("f%1").arg(i);
+    const QString commandLine = (QStringList{"/usr/bin/rm"} + argv.mid(2)).join(' ');
+    const auto    facts       = bb::buildRequestFacts(execInput(argv, "/usr/bin/rm", commandLine));
+    QCOMPARE(facts.value("truncated").toBool(), true);
+    QCOMPARE(facts.value("argv").toArray().size(), 256);
+}
+
+namespace {
+    // What polkit 127 actually forwards: no pkexec details, the command in
+    // the message, root showing as the overflow uid with full capabilities.
+    bb::RequestFactsInput messageInput(const QStringList& argv, const QString& message) {
+        bb::RequestFactsInput in;
+        in.actionId      = "org.freedesktop.policykit.exec";
+        in.message       = message;
+        in.details       = {{"polkit.caller-pid", "4242"}, {"polkit.subject-pid", "4241"}};
+        in.caller        = pkexecCaller(argv, 65534);
+        in.caller->capEff = 0x000001ffffffffffULL;
+        in.subjectCwd    = "/home/u/proj";
+        in.homeForUser   = [](const QString& user) { return user == "root" ? QString("/root") : QString("/home/") + user; };
+        return in;
+    }
+}
+
+void RequestContextTest::testFactsFromPkexecMessage() {
+    const auto facts = bb::buildRequestFacts(messageInput({"pkexec", "rm", "-r", "/tmp/bb-demo"},
+                                                          "Authentication is needed to run `/usr/bin/rm -r /tmp/bb-demo' as the super user"));
+    QCOMPARE(facts.value("argv").toArray(), QJsonArray({"/usr/bin/rm", "-r", "/tmp/bb-demo"}));
+    QCOMPARE(facts.value("program").toString(), QString("/usr/bin/rm"));
+    QCOMPARE(facts.value("user").toString(), QString("root"));
+    QCOMPARE(facts.value("cwdFrom").toString(), QString("target-home"));
+
+    const auto other = bb::buildRequestFacts(messageInput({"pkexec", "--user", "alice", "--keep-cwd", "/usr/bin/id"},
+                                                          "Authentication is needed to run `/usr/bin/id' as user Alice Liddell (alice)"));
+    QCOMPARE(other.value("user").toString(), QString("alice"));
+    QCOMPARE(other.value("cwdFrom").toString(), QString("requester"));
+}
+
+void RequestContextTest::testFactsFromShortenedPkexecMessage() {
+    QStringList argv{"pkexec", "pacman", "-S", "--needed"};
+    for (int i = 0; i < 12; ++i)
+        argv << QString("package-%1").arg(i);
+    const QString full  = (QStringList{"/usr/bin/pacman"} + argv.mid(2)).join(' ');
+    const QString shown = full.left(38) + " ... " + full.right(37);
+    const auto    facts = bb::buildRequestFacts(messageInput(argv, "Authentication is needed to run `" + shown + "' as the super user"));
+    QCOMPARE(facts.value("argv").toArray().size(), argv.size() - 1);
+    QCOMPARE(facts.value("argv").toArray().first().toString(), QString("/usr/bin/pacman"));
+
+    // The argv comes from the caller's /proc; the message cross-checks the
+    // parts it shows, which must match byte for byte.
+    QVERIFY(bb::buildRequestFacts(messageInput(argv, "Authentication is needed to run `" + shown.left(shown.size() - 1) + "x' as the super user")).isEmpty());
+}
+
+void RequestContextTest::testFactsRejectMismatchedMessage() {
+    // The message names another command than the caller's argv.
+    QVERIFY(bb::buildRequestFacts(messageInput({"pkexec", "rm", "a"}, "Authentication is needed to run `/usr/bin/rm b' as the super user")).isEmpty());
+    // PATH resolution must end in PROGRAM.
+    QVERIFY(bb::buildRequestFacts(messageInput({"pkexec", "rm", "a"}, "Authentication is needed to run `/usr/bin/cp a' as the super user")).isEmpty());
+    // Not pkexec's wording (another action's or a translated message).
+    QVERIFY(bb::buildRequestFacts(messageInput({"pkexec", "rm", "a"}, "Authentifizierung ist erforderlich")).isEmpty());
+    // An unprivileged caller: overflow uid without capabilities.
+    auto in           = messageInput({"pkexec", "rm", "a"}, "Authentication is needed to run `/usr/bin/rm a' as the super user");
+    in.caller->capEff = 0;
+    QVERIFY(bb::buildRequestFacts(in).isEmpty());
+}
+
+void RequestContextTest::testFactsMechanismDetails() {
+    bb::RequestFactsInput in;
+    in.actionId = "org.freedesktop.systemd1.manage-units";
+    in.details  = {{"unit", "bluetooth.service"}, {"verb", "restart"}, {"polkit.caller-pid", "1"}, {"polkit.message", "x"}};
+    ProcInfo systemd;
+    systemd.pid  = 1;
+    systemd.euid = 0;
+    in.caller    = systemd;
+    const auto facts = bb::buildRequestFacts(in);
+    QCOMPARE(facts.value("kind").toString(), QString("action"));
+    const auto details = facts.value("details").toObject();
+    QCOMPARE(details.keys(), QStringList({"unit", "verb"}));
+    QVERIFY(!facts.contains("argv"));
+}
+
+void RequestContextTest::testReadProcArgvAndCwdSelf() {
+    const auto self = bb::readProc(getpid());
+    QVERIFY(self.has_value());
+    QVERIFY(!self->argv.isEmpty());
+    QCOMPARE(bb::readProcCwd(getpid()), QDir::currentPath());
+}
+
 int runRequestContextTests(int argc, char** argv) {
     RequestContextTest test;
     return QTest::qExec(&test, argc, argv);

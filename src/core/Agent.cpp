@@ -1,6 +1,7 @@
 #include "Agent.hpp"
 #include "../common/Constants.hpp"
 #include "RequestContext.hpp"
+#include "RequestFacts.hpp"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -494,6 +495,30 @@ bool CAgent::onPolkitRequest(const QString& cookie, const QString& message, [[ma
         ctx.requestor.name           = "Unknown";
         ctx.requestor.fallbackLetter = "?";
         ctx.requestor.fallbackKey    = "unknown";
+    }
+
+    {
+        RequestFactsInput facts;
+        facts.actionId = actionId;
+        facts.message  = message;
+        for (const QString& key : details.keys())
+            facts.details.insert(key, details.lookup(key));
+        if (auto callerPid = RequestContextHelper::extractCallerPid(details))
+            facts.caller = RequestContextHelper::readProc(*callerPid);
+        if (pid)
+            facts.subjectCwd = bb::readProcCwd(*pid);
+        facts.homeForUser = [](const QString& name) {
+            const struct passwd* pw = getpwnam(name.toUtf8().constData());
+            return pw ? QString::fromUtf8(pw->pw_dir) : QString();
+        };
+        ctx.request = buildRequestFacts(facts);
+        // Says why a prompt fell back to the bare message: facts need a root
+        // caller whose argv matches what polkit reports.
+        qDebug() << "Request facts:" << (ctx.request.isEmpty() ? QStringLiteral("none") : ctx.request.value("kind").toString())
+                 << "caller" << (facts.caller ? facts.caller->pid : 0) << "euid" << (facts.caller ? facts.caller->euid : -1)
+                 << "capEff" << QString::number(facts.caller ? facts.caller->capEff : 0, 16)
+                 << "argv0" << (facts.caller && !facts.caller->argv.isEmpty() ? facts.caller->argv.first() : QString())
+                 << "detail keys" << facts.details.keys();
     }
 
     // Correlate a declared intent (hook/MCP) to this request via shared agent ancestry.

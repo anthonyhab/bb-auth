@@ -323,6 +323,37 @@ trusted identity (the macOS SecurityAgent model) is the longer-term direction.
 
 `requestor` is OS-resolved (authoritative). `intent` is self-asserted (display/audit only). Either may be absent.
 
+As of v2.2, a polkit `session.created` `context` may also carry `request`: what the
+request will do, as reported by the root mechanism that asked polkit, never by the
+requester. The daemon includes it only when the polkit caller is privileged
+(effective uid 0, or holding `CAP_SETUID`: the service's sandbox maps root to the
+overflow uid but leaves capability sets unmapped), since a user process can put
+anything in polkit details. For pkexec, the caller's argv must also reproduce the
+command line pkexec reported: its `command_line` detail when polkit forwards it,
+otherwise the `$(cmdline_short)` in its message (polkit 127 forwards only
+`polkit.*` details to agents).
+
+```json
+"request":{"kind":"exec","actionId":"org.freedesktop.policykit.exec",
+           "program":"/usr/bin/rm","argv":["/usr/bin/rm","-rf","build"],
+           "user":"root","cwd":"/home/u/proj","cwdFrom":"requester"}
+"request":{"kind":"action","actionId":"org.freedesktop.systemd1.manage-units",
+           "details":{"unit":"bluetooth.service","verb":"restart"}}
+```
+
+- `program` is the canonical path that runs when pkexec's details arrive, otherwise
+  the path pkexec resolved (possibly a symlink); `argv[0]` is the name it is called by.
+- `cwd` is where the program runs: the requester's directory with `pkexec --keep-cwd`
+  (`cwdFrom: "requester"`, read from the requesting process, which could have changed
+  directory after starting pkexec), otherwise the target user's home
+  (`cwdFrom: "target-home"`). Absent when unreadable.
+- `argv` holds at most 256 arguments and 16 KiB; `truncated: true` marks a cut.
+- `details` keeps at most 16 non-`polkit.*` keys, values cut to 512 characters.
+
+Compatibility: additive and optional. Providers that ignore `request` behave as
+before; providers MUST treat it as display input and MUST NOT make the
+allow/deny decision from it (polkit still decides).
+
 Generic replies:
 
 ```json

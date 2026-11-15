@@ -137,7 +137,7 @@ What the hooks do, per privileged tool call:
 
 - **Declare** who + why to the daemon. The reason is the agent's last message
   where the harness exposes a transcript (Claude Code, Codex, Devin, pi).
-- **Hand off**: a clean `sudo CMD`/`doas CMD` is rewritten to `pkexec CMD` and
+- **Hand off**: a clean `sudo CMD`/`doas CMD` is rewritten to `pkexec --keep-cwd CMD` and
   approved at the harness level — but **only when polkit will prompt you**
   (`pkcheck` says a challenge is required). If a polkit rule would authorize
   pkexec silently, the command stays on the harness's own permission path.

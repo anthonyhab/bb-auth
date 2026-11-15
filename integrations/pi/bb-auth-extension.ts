@@ -45,7 +45,7 @@ function rewriteSudo(command) {
     break // first non-option token: command begins
   }
   if (!rest) return null
-  return "pkexec" + (user ? " --user " + user : "") + " " + rest
+  return "pkexec --keep-cwd" + (user ? " --user " + user : "") + " " + rest
 }
 
 // Declare intent over the bb-auth socket and resolve true only when the daemon

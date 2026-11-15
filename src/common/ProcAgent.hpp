@@ -6,6 +6,7 @@
 
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 #include <optional>
 
 struct ProcInfo {
@@ -13,10 +14,12 @@ struct ProcInfo {
     qint64      ppid      = 0;
     qint64      uid       = 0;
     qint64      euid      = 0;
+    quint64     capEff    = 0; // /proc/<pid>/status CapEff: raw bits, never remapped by a user namespace
     qint64      startTime = 0; // /proc/<pid>/stat field 22 (clock ticks since boot)
     QString     name;
     QString     exe;
     QString     cmdline;
+    QStringList argv; // /proc/<pid>/cmdline split on NUL, empty arguments kept
 
     QJsonObject toJson() const;
 };
@@ -37,6 +40,10 @@ namespace bb {
     // Read /proc/<pid> pinned by a directory fd so every field describes the
     // same process generation. nullopt when the pid is gone or unreadable.
     std::optional<ProcInfo> readProc(qint64 pid);
+
+    // The process's working directory, or empty when unreadable (another
+    // user's process, or a setuid one that is not dumpable).
+    QString readProcCwd(qint64 pid);
 
     // Recognize a known AI agent runtime from a process's comm/exe/cmdline.
     AgentMatch detectAgent(const ProcInfo& proc);

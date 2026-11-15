@@ -57,7 +57,7 @@ class OpencodePluginCase(unittest.TestCase):
         return json.loads(proc.stdout)["command"]
 
     def test_sudo_rewrites_and_declares(self):
-        self.assertEqual(self.invoke("sudo pacman -Sc"), "pkexec pacman -Sc")
+        self.assertEqual(self.invoke("sudo pacman -Sc"), "pkexec --keep-cwd pacman -Sc")
         self.assertEqual(self.daemon.payloads[0]["agent"], "opencode")
 
     def test_shared_translation_vectors(self):

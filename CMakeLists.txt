@@ -80,6 +80,8 @@ qt_add_executable(bb-auth
     src/core/PolkitListener.cpp
     src/core/RequestContext.hpp
     src/core/RequestContext.cpp
+    src/core/RequestFacts.cpp
+    src/core/RequestFacts.hpp
     src/common/ProcAgent.cpp
     src/core/ipc/IpcServer.cpp
 
@@ -260,6 +262,8 @@ qt_add_executable(bb-auth-tests
     src/core/Session.cpp
     src/core/Session.hpp
     src/core/RequestContext.cpp
+    src/core/RequestFacts.cpp
+    src/core/RequestFacts.hpp
     src/common/ProcAgent.cpp
     src/core/RequestContext.hpp
     src/core/agent/EventQueue.cpp

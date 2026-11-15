@@ -66,7 +66,7 @@ namespace bb::agent {
                 return {{}, QStringLiteral("shell metacharacters in command; declining")};
         if (haveUser && metaChars().match(user).hasMatch())
             return {{}, QStringLiteral("shell metacharacters in command; declining")};
-        QStringList argv{QStringLiteral("pkexec")};
+        QStringList argv{QStringLiteral("pkexec"), QStringLiteral("--keep-cwd")};
         if (haveUser)
             argv << QStringLiteral("--user") << user;
         argv << rest;
@@ -121,7 +121,7 @@ namespace bb::agent {
         }
         if (rest.isEmpty())
             return {};
-        return QStringLiteral("pkexec") + (user.isEmpty() ? QString() : QStringLiteral(" --user ") + user) +
+        return QStringLiteral("pkexec --keep-cwd") + (user.isEmpty() ? QString() : QStringLiteral(" --user ") + user) +
             QLatin1Char(' ') + rest;
     }
 

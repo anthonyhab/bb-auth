@@ -98,7 +98,7 @@ class PiExtensionCase(unittest.TestCase):
     def test_sudo_rewrites_and_declares(self):
         proc = self.invoke("sudo pacman -Sc")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(json.loads(proc.stdout)["command"], "pkexec pacman -Sc")
+        self.assertEqual(json.loads(proc.stdout)["command"], "pkexec --keep-cwd pacman -Sc")
         self.assertEqual(len(self.daemon.payloads), 1)
         d = self.daemon.payloads[0]
         self.assertEqual(d["agent"], "pi")
@@ -106,11 +106,11 @@ class PiExtensionCase(unittest.TestCase):
 
     def test_sudo_n_rewrites(self):
         proc = self.invoke("sudo -n make install")
-        self.assertEqual(json.loads(proc.stdout)["command"], "pkexec make install")
+        self.assertEqual(json.loads(proc.stdout)["command"], "pkexec --keep-cwd make install")
 
     def test_sudo_user_flag_maps(self):
         proc = self.invoke("sudo -u nobody id")
-        self.assertEqual(json.loads(proc.stdout)["command"], "pkexec --user nobody id")
+        self.assertEqual(json.loads(proc.stdout)["command"], "pkexec --keep-cwd --user nobody id")
 
     def test_unsupported_option_declares_but_no_rewrite(self):
         proc = self.invoke("sudo -E id")

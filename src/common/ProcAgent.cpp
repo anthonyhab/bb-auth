@@ -108,6 +108,8 @@ std::optional<ProcInfo> readProc(qint64 pid) {
                 info.uid = parts[0].toLongLong();
             if (parts.size() >= 2)
                 info.euid = parts[1].toLongLong();
+        } else if (line.startsWith("CapEff:")) {
+            info.capEff = line.section(':', 1).trimmed().toULongLong(nullptr, 16);
         }
     }
 
@@ -124,6 +126,10 @@ std::optional<ProcInfo> readProc(qint64 pid) {
     // 3. cmdline (NUL-separated argv)
     const QByteArray cmdline = readProcEntry(dirfd, "cmdline");
     if (!cmdline.isEmpty()) {
+        // cmdline ends with a NUL; every NUL before that ends one argument.
+        const QList<QByteArray> raw = cmdline.endsWith('\0') ? cmdline.chopped(1).split('\0') : cmdline.split('\0');
+        for (const auto& a : raw)
+            info.argv << QString::fromUtf8(a);
         QStringList cleanArgs;
         for (const auto& a : cmdline.split('\0'))
             if (!a.isEmpty())
@@ -136,6 +142,15 @@ std::optional<ProcInfo> readProc(qint64 pid) {
 
     close(dirfd);
     return info;
+}
+
+QString readProcCwd(qint64 pid) {
+    const QByteArray link = QByteArrayLiteral("/proc/") + QByteArray::number(pid) + QByteArrayLiteral("/cwd");
+    char             buf[4096];
+    const ssize_t    n = readlink(link.constData(), buf, sizeof(buf) - 1);
+    if (n <= 0)
+        return {};
+    return QString::fromUtf8(buf, static_cast<int>(n));
 }
 
 // @lat: [[agent-intent#Intent declaration and correlation]]

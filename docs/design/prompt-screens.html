@@ -1,0 +1,500 @@
+<title>bb-auth Prompt Screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a column of real-size prompt sheets on a faux desktop, each with
+ * a margin note that says which facts the daemon verified and which the
+ * agent claimed. Tokens mirror omafire's --oc-* (theme/src/tokens.css):
+ * everything derives from the Omarchy palette's foreground, background
+ * and accent, so the whole page follows the palette switch. */
+:root {
+  --bg: #222222;
+  --frame: #191919;
+  --fg: #c2c2b0;
+  --accent: #78824b;
+  --red: #b0614e;
+  --yellow: #b36d43;
+  --green: #5f875f;
+  --radius: 8px;
+  --font: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --text: var(--fg);
+  --text-label: color-mix(in srgb, var(--fg) 80%, transparent);
+  --text-dim: color-mix(in srgb, var(--fg) 62%, transparent);
+  --line: color-mix(in srgb, var(--fg) 11%, transparent);
+  --line-strong: color-mix(in srgb, var(--fg) 22%, transparent);
+  --hover: color-mix(in srgb, var(--fg) 8%, transparent);
+  --active: color-mix(in srgb, var(--fg) 18%, transparent);
+  --field-rest: color-mix(in srgb, var(--fg) 5%, transparent);
+  --field-hover: color-mix(in srgb, var(--fg) 10%, transparent);
+  --panel: color-mix(in srgb, var(--frame), var(--fg) 5%);
+  --scrim: color-mix(in srgb, var(--frame) 72%, transparent);
+  --focus: var(--accent);
+  --glow: var(--accent);
+  --glow-falloff:
+    color-mix(in srgb, var(--glow) 22%, transparent),
+    color-mix(in srgb, var(--glow) 6%, transparent) 45%,
+    transparent 75%;
+  --glow-edge:
+    var(--line-strong) 8%,
+    color-mix(in srgb, var(--glow) 85%, transparent) 50%,
+    var(--line-strong) 92%;
+  --danger: var(--red);
+  --danger-wash: color-mix(in srgb, var(--danger) 18%, transparent);
+  --caution: var(--yellow);
+  --add: color-mix(in srgb, var(--green) 20%, transparent);
+  --del: color-mix(in srgb, var(--red) 20%, transparent);
+  color-scheme: dark;
+}
+:root[data-palette="tokyo"] {
+  --bg: #1a1b26; --frame: #16161e; --fg: #a9b1d6; --accent: #7aa2f7;
+  --red: #f7768e; --yellow: #e0af68; --green: #9ece6a; color-scheme: dark;
+}
+:root[data-palette="dawn"] {
+  --bg: #faf4ed; --frame: #f2e9e1; --fg: #575279; --accent: #286983;
+  --red: #b4637a; --yellow: #ea9d34; --green: #56949f; color-scheme: light;
+  /* Light palettes lean text and marks stronger (omafire contrast floors). */
+  --text-label: color-mix(in srgb, var(--fg) 90%, transparent);
+  --text-dim: color-mix(in srgb, var(--fg) 70%, transparent);
+  --focus: color-mix(in srgb, var(--accent), var(--fg) 30%);
+  --panel: color-mix(in srgb, #fffaf3, var(--fg) 3%);
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 13px/1.55 var(--font);
+  padding-inline: 16px;
+  padding-block: 40px 64px;
+}
+.page { max-width: 1080px; margin-inline: auto; display: grid; gap: 40px; }
+
+header.intro { display: grid; gap: 14px; max-width: 70ch; }
+header.intro h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+header.intro p { margin: 0; color: var(--text-label); }
+.controls { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); padding: 2px; gap: 2px; }
+.seg-label { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin-right: 8px; }
+.seg button {
+  font: inherit; font-size: 12px; color: var(--text-label); background: none; border: 0;
+  padding: 4px 10px; border-radius: calc(var(--radius) - 3px); cursor: pointer;
+}
+.seg button:hover { background: var(--hover); color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--active); color: var(--text); }
+button:focus-visible, .disclose:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
+
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.principles div { background: var(--bg); padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.principles b { font-weight: 500; }
+.principles span { color: var(--text-dim); font-size: 12px; }
+
+/* ---- a screen: desktop + sheet + margin note ---- */
+.screen { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 300px); gap: 28px; align-items: start; }
+@media (max-width: 860px) { .screen { grid-template-columns: minmax(0, 1fr); } }
+.screen > h2 { grid-column: 1 / -1; margin: 0; font-size: 12px; font-weight: 500; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; display: flex; gap: 12px; align-items: baseline; }
+.screen > h2 .n { color: var(--text-label); font-variant-numeric: tabular-nums; }
+
+.desktop {
+  position: relative; border-radius: var(--radius); overflow: hidden;
+  padding: 44px 16px; display: grid; place-items: center; min-width: 0;
+  background:
+    radial-gradient(120% 90% at 20% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%),
+    radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--yellow) 12%, transparent), transparent 60%),
+    var(--frame);
+}
+.desktop::before { content: ""; position: absolute; inset: 0; background: var(--scrim); }
+
+.sheet {
+  position: relative; width: 100%; max-width: 460px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px -20px rgb(0 0 0 / 0.55);
+  display: grid; overflow: hidden;
+}
+/* The active signal: light falling from the top edge and the hairline lit
+ * in the same hue. The sheet is the one current thing on screen. */
+.sheet::before {
+  content: ""; position: absolute; inset: 0 0 auto; height: 1px;
+  background: linear-gradient(to right, var(--glow-edge));
+}
+.sheet::after {
+  content: ""; position: absolute; inset: 0 0 auto; height: 120px; pointer-events: none;
+  background: linear-gradient(to bottom, var(--glow-falloff));
+  opacity: 0.8;
+}
+.sheet > * { position: relative; z-index: 1; }
+.sec { padding: 16px 20px; display: grid; gap: 10px; }
+.sec + .sec { border-top: 1px solid var(--line); }
+
+.who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mono { width: 24px; height: 24px; flex: none; border: 1px solid var(--line-strong); border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 600; color: var(--text); }
+.who .name { font-weight: 500; }
+.who .where { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.who .queue { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; flex: none; }
+
+.subject { display: grid; gap: 2px; }
+.subject h3 { margin: 0; font-size: 19px; font-weight: 500; line-height: 1.3; letter-spacing: -0.01em; text-wrap: balance; }
+.subject .as { color: var(--text-dim); font-size: 12px; }
+.subject .as b { color: var(--text-label); font-weight: 400; }
+
+.rows { display: grid; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; padding: 7px 0; align-items: baseline; }
+.row + .row { border-top: 1px solid var(--line); }
+.row .k { min-width: 0; overflow-wrap: anywhere; }
+.row .v { color: var(--text-label); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.row .sub { grid-column: 1 / -1; color: var(--text-dim); font-size: 12px; }
+.ver { color: var(--text-dim); }
+.ver .to { color: var(--text); }
+.more { color: var(--text-dim); font-size: 12px; padding-top: 6px; }
+.path .dir { color: var(--text-dim); }
+
+/* Caution and destructive notes: a short tick in the palette hue and plain
+ * text, never a filled banner. One signal per note. */
+.note { display: grid; grid-template-columns: 3px minmax(0, 1fr); gap: 10px; align-items: stretch; font-size: 12px; color: var(--text-label); }
+.note::before { content: ""; border-radius: 2px; background: var(--caution); margin-block: 3px; }
+.note.danger::before { background: var(--danger); }
+.note.plain::before { background: var(--line-strong); }
+.note b { color: var(--text); font-weight: 500; }
+
+.diff { border: 1px solid var(--line); border-radius: calc(var(--radius) - 3px); overflow-x: auto; font-size: 12px; line-height: 1.6; }
+.diff .h { color: var(--text-dim); padding: 4px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.diff pre { margin: 0; font: inherit; padding: 4px 0; }
+.diff span { display: block; padding-inline: 10px; white-space: pre; }
+.diff .a { background: var(--add); }
+.diff .d { background: var(--del); }
+.diff .c { color: var(--text-dim); }
+
+.said { display: grid; gap: 4px; }
+.said .lbl { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+.said q { color: var(--text-label); quotes: "\201C" "\201D"; }
+
+.disclose {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  font: inherit; font-size: 12px; color: var(--text-dim); background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
+}
+.disclose:hover { color: var(--text); }
+.disclose .chev { transition: transform 150ms ease; display: inline-block; }
+.disclose[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.argv { font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px; }
+.argv code { font: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--text-label); overflow-wrap: anywhere; }
+.argv code:first-child { color: var(--text); border-color: var(--line-strong); }
+
+/* The field: a quiet box on the hairline; keyboard focus is the 1px accent
+ * ring, which is the only accent-coloured line on the sheet at rest. */
+.auth { display: grid; gap: 10px; }
+.field {
+  display: flex; align-items: center; gap: 10px; height: 40px; padding-inline: 12px;
+  background: var(--field-rest); border: 1px solid var(--line); border-radius: calc(var(--radius) - 3px);
+  outline: 1px solid var(--focus); outline-offset: -1px;
+}
+.field svg { flex: none; color: var(--text-dim); }
+.field .ph { color: var(--text-dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field .dots { flex: 1; letter-spacing: 0.2em; color: var(--text); }
+.field .caret { width: 1px; height: 16px; background: var(--text); animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.keys { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); }
+.keys span { display: inline-flex; gap: 6px; align-items: center; }
+kbd { font: inherit; font-size: 11px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--text-label); }
+.keys .primary { color: var(--text); }
+
+/* States, driven by the page's state switch. */
+[data-state="checking"] .field { outline-color: transparent; }
+[data-state="checking"] .field .ph::after { content: ""; }
+[data-state="wrong"] .field { outline-color: var(--danger); background: var(--danger-wash); }
+[data-state="wrong"] .sheet { animation: shake 160ms ease-out 1; }
+@keyframes shake { 25% { translate: -6px 0; } 60% { translate: 6px 0; } }
+.st { display: none; }
+[data-state="rest"] .st-rest, [data-state="typing"] .st-typing, [data-state="checking"] .st-checking,
+[data-state="wrong"] .st-wrong, [data-state="touch"] .st-touch { display: contents; }
+.spin { width: 14px; height: 14px; border: 1.5px solid var(--line-strong); border-top-color: var(--text); border-radius: 50%; animation: spin 0.8s linear infinite; flex: none; }
+@keyframes spin { to { rotate: 1turn; } }
+.pulse { animation: pulse 1.6s ease-in-out infinite; color: var(--accent) !important; }
+@keyframes pulse { 50% { opacity: 0.45; } }
+
+.margin { display: grid; gap: 14px; font-size: 12px; color: var(--text-label); min-width: 0; }
+.margin h4 { margin: 0; font-size: 11px; font-weight: 500; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+.margin ul { margin: 0; padding-left: 16px; display: grid; gap: 4px; }
+.margin p { margin: 0; }
+.src { display: inline-block; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 4px; color: var(--text-dim); margin-right: 4px; }
+.src.claim { border-style: dashed; }
+
+footer { color: var(--text-dim); font-size: 12px; max-width: 70ch; display: grid; gap: 8px; }
+footer p { margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@media (max-width: 480px) {
+  .desktop { padding: 24px 10px; }
+  .sec { padding: 14px 14px; }
+}
+</style>
+
+<div class="page" id="page" data-state="typing">
+
+<header class="intro">
+  <h1>bb-auth prompt screens</h1>
+  <p>One sheet for every privileged request, with a screen shaped for each kind of command. The top half is what bb-auth verified about the request. What the agent says about it sits below, in quotes. The raw command is one keypress away on every screen.</p>
+  <div class="controls">
+    <div><span class="seg-label">Palette</span><span class="seg" role="group" aria-label="Palette">
+      <button type="button" id="p-current" data-palette="current" aria-pressed="true">Your theme</button>
+      <button type="button" id="p-tokyo" data-palette="tokyo" aria-pressed="false">Tokyo Night</button>
+      <button type="button" id="p-dawn" data-palette="dawn" aria-pressed="false">Rosé Pine Dawn</button>
+    </span></div>
+    <div><span class="seg-label">Field</span><span class="seg" role="group" aria-label="Field state">
+      <button type="button" id="s-rest" data-state="rest" aria-pressed="false">Empty</button>
+      <button type="button" id="s-typing" data-state="typing" aria-pressed="true">Typing</button>
+      <button type="button" id="s-checking" data-state="checking" aria-pressed="false">Checking</button>
+      <button type="button" id="s-wrong" data-state="wrong" aria-pressed="false">Wrong password</button>
+      <button type="button" id="s-touch" data-state="touch" aria-pressed="false">Fingerprint</button>
+    </span></div>
+  </div>
+</header>
+
+<section class="principles" aria-label="Rules the screens follow">
+  <div><b>Facts first</b><span>The title and details come from pkexec and the system, never from the agent.</span></div>
+  <div><b>One signal per state</b><span>The sheet glows because it is the current thing. Focus is a 1px accent ring. Warnings are a short tick, not a banner.</span></div>
+  <div><b>Say what is unknown</b><span>A preview that could not read a path, or was cut short, says so on the row.</span></div>
+  <div><b>Keyboard owns it</b><span>Enter allows, Esc denies, Tab opens the exact command. The agent cannot type here.</span></div>
+</section>
+
+<!-- 1. Package change -->
+<section class="screen" aria-labelledby="h1">
+  <h2 id="h1"><span class="n">1</span> Package change · pacman -U</h2>
+  <div class="desktop">
+    <div class="sheet">
+      <div class="sec">
+        <div class="who"><span class="mono" aria-hidden="true">Cx</span><span class="name">Codex</span><span class="where">~/Projects/bb-auth</span><span class="queue">1 of 2</span></div>
+        <div class="subject">
+          <h3>Upgrade bb-auth</h3>
+          <span class="as">Installs a package file · as <b>root</b></span>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="rows">
+          <div class="row"><span class="k">bb-auth</span><span class="v ver">0.3.0-1 → <span class="to">0.3.1-1</span></span>
+            <span class="sub">2.4 MiB installed (+48 KiB) · 37 files in /usr/bin, /usr/lib/bb-auth</span></div>
+        </div>
+        <div class="note"><span><b>Local file, not signed.</b> Built 4 min ago in ~/Projects/bb-auth/build. pacman will not check where it came from.</span></div>
+        <div class="note plain"><span>Afterwards pacman runs 2 hooks: systemd daemon-reload, update desktop database.</span></div>
+      </div>
+      <div class="sec">
+        <div class="said"><span class="lbl">Codex says</span><q>Install the rebuilt daemon so the provider exec fix takes effect.</q></div>
+        <button type="button" class="disclose" id="d1" aria-expanded="false" aria-controls="a1"><span class="chev">›</span> Exact command <kbd>Tab</kbd></button>
+        <div class="argv" id="a1" hidden><code>/usr/bin/pacman</code><code>-U</code><code>--noconfirm</code><code>/home/habibe/Projects/bb-auth/build/bb-auth-0.3.1-1-x86_64.pkg.tar.zst</code></div>
+      </div>
+      <div class="sec auth">
+        <div class="field">
+          <span class="st st-touch"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" class="pulse" aria-hidden="true"><path d="M4 12.5c.8-1.2 1.2-2.7 1.2-4.5a2.8 2.8 0 0 1 5.6 0c0 1.1-.1 2.2-.4 3.2M8 8c0 2.2-.6 4.2-1.8 5.8M3 9.5c.3-.6.4-1 .4-1.5a4.6 4.6 0 0 1 9.2 0c0 1.9-.3 3.6-.9 5.1"/></svg><span class="ph">Touch the fingerprint reader</span></span>
+          <span class="st st-rest st-typing st-wrong"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg></span>
+          <span class="st st-rest"><span class="ph">Password for habibe</span></span>
+          <span class="st st-typing"><span class="dots">••••••••••</span><span class="caret"></span></span>
+          <span class="st st-checking"><span class="spin" aria-hidden="true"></span><span class="ph">Checking…</span></span>
+          <span class="st st-wrong"><span class="ph">Wrong password · 2 tries left</span></span>
+        </div>
+        <div class="keys"><span><kbd>Esc</kbd> Deny</span><span class="primary"><kbd>↵</kbd> Allow</span></div>
+      </div>
+    </div>
+  </div>
+  <aside class="margin">
+    <h4>Where each line comes from</h4>
+    <ul>
+      <li><span class="src">pkexec</span>the command, the target user</li>
+      <li><span class="src">pacman</span>versions and sizes (<code>pacman -Qip</code> on the file, <code>-Q</code> for the installed one), file count, hooks that match</li>
+      <li><span class="src">file</span>when it was built and where; no <code>.sig</code> beside it</li>
+      <li><span class="src claim">agent</span>the quoted reason only</li>
+    </ul>
+    <p>The title is a verb the preview earned: <em>Upgrade</em> because the same package is installed at a lower version. A new package reads <em>Install</em>, and <code>-R</code> reads <em>Remove</em>, with what depends on it.</p>
+  </aside>
+</section>
+
+<!-- 2. Delete -->
+<section class="screen" aria-labelledby="h2">
+  <h2 id="h2"><span class="n">2</span> Delete · rm -rf</h2>
+  <div class="desktop">
+    <div class="sheet">
+      <div class="sec">
+        <div class="who"><span class="mono" aria-hidden="true">CC</span><span class="name">Claude Code</span><span class="where">~/Projects/zeroclaw</span></div>
+        <div class="subject">
+          <h3>Delete 1,205 files · 312 MiB</h3>
+          <span class="as">From 2 places · as <b>root</b> · can't be undone</span>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="rows">
+          <div class="row"><span class="k path"><span class="dir">/opt/</span>zeroclaw/</span><span class="v">1,204 files · 312 MiB</span>
+            <span class="sub">bin/ 3 · lib/ 1,188 · share/ 13 · newest change Aug 30</span></div>
+          <div class="row"><span class="k path"><span class="dir">/etc/systemd/system/bluetooth.service.d/</span>experimental.conf</span><span class="v">112 B</span>
+            <span class="sub">edited Sep 12 by you</span></div>
+        </div>
+        <div class="note plain"><span>No package owns any of these files.</span></div>
+        <div class="note danger"><span><b>bluetooth.service</b> is running with this override. It keeps it until the next restart.</span></div>
+      </div>
+      <div class="sec">
+        <div class="said"><span class="lbl">Claude Code says</span><q>Remove the old ZeroClaw install and the experimental Bluetooth override you asked me to drop.</q></div>
+        <button type="button" class="disclose" id="d2" aria-expanded="true" aria-controls="a2"><span class="chev">›</span> Exact command <kbd>Tab</kbd></button>
+        <div class="argv" id="a2"><code>/usr/bin/rm</code><code>-rf</code><code>/opt/zeroclaw</code><code>/etc/systemd/system/bluetooth.service.d/experimental.conf</code></div>
+      </div>
+      <div class="sec auth">
+        <div class="field">
+          <span class="st st-touch"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" class="pulse" aria-hidden="true"><path d="M4 12.5c.8-1.2 1.2-2.7 1.2-4.5a2.8 2.8 0 0 1 5.6 0c0 1.1-.1 2.2-.4 3.2M8 8c0 2.2-.6 4.2-1.8 5.8M3 9.5c.3-.6.4-1 .4-1.5a4.6 4.6 0 0 1 9.2 0c0 1.9-.3 3.6-.9 5.1"/></svg><span class="ph">Touch the fingerprint reader</span></span>
+          <span class="st st-rest st-typing st-wrong"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg></span>
+          <span class="st st-rest"><span class="ph">Password for habibe</span></span>
+          <span class="st st-typing"><span class="dots">••••••••••</span><span class="caret"></span></span>
+          <span class="st st-checking"><span class="spin" aria-hidden="true"></span><span class="ph">Checking…</span></span>
+          <span class="st st-wrong"><span class="ph">Wrong password · 2 tries left</span></span>
+        </div>
+        <div class="keys"><span><kbd>Esc</kbd> Deny</span><span class="primary"><kbd>↵</kbd> Delete</span></div>
+      </div>
+    </div>
+  </div>
+  <aside class="margin">
+    <h4>Where each line comes from</h4>
+    <ul>
+      <li><span class="src">pkexec</span>the command; paths resolved against the requester's working directory</li>
+      <li><span class="src">stat</span>counts and sizes, walked as you (read-only, 400 ms and 20,000 entries at most)</li>
+      <li><span class="src">pacman</span><code>-Qo</code> ownership for each top-level path</li>
+      <li><span class="src">systemd</span>the drop-in belongs to a running unit</li>
+      <li><span class="src claim">agent</span>the quoted reason only</li>
+    </ul>
+    <p>Enter reads <em>Delete</em> here, not <em>Allow</em>: the key names what happens. A walk that hits its limit says <em>at least 20,000 files</em>; a folder you can't read says <em>contents unreadable</em>. Neither is left blank.</p>
+  </aside>
+</section>
+
+<!-- 3. System file write -->
+<section class="screen" aria-labelledby="h3">
+  <h2 id="h3"><span class="n">3</span> System file · install</h2>
+  <div class="desktop">
+    <div class="sheet">
+      <div class="sec">
+        <div class="who"><span class="mono" aria-hidden="true">Cx</span><span class="name">Codex</span><span class="where">~/Projects/omarchy-pr</span></div>
+        <div class="subject">
+          <h3>Change hyprland-portals.conf</h3>
+          <span class="as">/usr/share/xdg-desktop-portal/ · as <b>root</b></span>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="diff" role="figure" aria-label="Changes to hyprland-portals.conf">
+          <div class="h">2 lines changed · mode 0644 root:root unchanged</div>
+          <pre><span class="c">[preferred]</span><span class="d">-default=hyprland;gtk</span><span class="a">+default=hyprland;gnome;gtk</span><span class="c"> org.freedesktop.impl.portal.Settings=darkman</span><span class="d">-org.freedesktop.impl.portal.FileChooser=gtk</span><span class="a">+org.freedesktop.impl.portal.FileChooser=gnome</span></pre>
+        </div>
+        <div class="note"><span><b>Owned by xdg-desktop-portal-hyprland.</b> The next update of that package will put its own version back.</span></div>
+      </div>
+      <div class="sec">
+        <div class="said"><span class="lbl">Codex says</span><q>Switch the file chooser portal to GNOME so Firefox gets the newer dialog.</q></div>
+        <button type="button" class="disclose" id="d3" aria-expanded="false" aria-controls="a3"><span class="chev">›</span> Exact command <kbd>Tab</kbd></button>
+        <div class="argv" id="a3" hidden><code>/usr/bin/install</code><code>-m</code><code>644</code><code>./hyprland-portals.conf</code><code>/usr/share/xdg-desktop-portal/hyprland-portals.conf</code></div>
+      </div>
+      <div class="sec auth">
+        <div class="field">
+          <span class="st st-touch"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" class="pulse" aria-hidden="true"><path d="M4 12.5c.8-1.2 1.2-2.7 1.2-4.5a2.8 2.8 0 0 1 5.6 0c0 1.1-.1 2.2-.4 3.2M8 8c0 2.2-.6 4.2-1.8 5.8M3 9.5c.3-.6.4-1 .4-1.5a4.6 4.6 0 0 1 9.2 0c0 1.9-.3 3.6-.9 5.1"/></svg><span class="ph">Touch the fingerprint reader</span></span>
+          <span class="st st-rest st-typing st-wrong"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg></span>
+          <span class="st st-rest"><span class="ph">Password for habibe</span></span>
+          <span class="st st-typing"><span class="dots">••••••••••</span><span class="caret"></span></span>
+          <span class="st st-checking"><span class="spin" aria-hidden="true"></span><span class="ph">Checking…</span></span>
+          <span class="st st-wrong"><span class="ph">Wrong password · 2 tries left</span></span>
+        </div>
+        <div class="keys"><span><kbd>Esc</kbd> Deny</span><span class="primary"><kbd>↵</kbd> Allow</span></div>
+      </div>
+    </div>
+  </div>
+  <aside class="margin">
+    <h4>Where each line comes from</h4>
+    <ul>
+      <li><span class="src">pkexec</span>the command</li>
+      <li><span class="src">file</span>the diff: source read as you, target read as you (both world-readable here; a root-only target says <em>can't show changes</em>)</li>
+      <li><span class="src">pacman</span><code>-Qo</code> for the target</li>
+      <li><span class="src claim">agent</span>the quoted reason only</li>
+    </ul>
+    <p>Diffs cap at 40 lines with a count of the rest. Binary files show size and checksum before and after instead.</p>
+  </aside>
+</section>
+
+<!-- 4. Service -->
+<section class="screen" aria-labelledby="h4">
+  <h2 id="h4"><span class="n">4</span> Service · systemctl (polkit action)</h2>
+  <div class="desktop">
+    <div class="sheet">
+      <div class="sec">
+        <div class="who"><span class="mono" aria-hidden="true">Cx</span><span class="name">Codex</span><span class="where">~</span></div>
+        <div class="subject">
+          <h3>Restart Bluetooth</h3>
+          <span class="as">bluetooth.service · system manager</span>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="rows">
+          <div class="row"><span class="k">Now</span><span class="v">active (running) · 2 h 24 min</span></div>
+          <div class="row"><span class="k">Drop-ins</span><span class="v">experimental.conf</span></div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="said"><span class="lbl">Codex says</span><q>Apply the new Bluetooth config.</q></div>
+        <button type="button" class="disclose" id="d4" aria-expanded="false" aria-controls="a4"><span class="chev">›</span> Exact request <kbd>Tab</kbd></button>
+        <div class="argv" id="a4" hidden><code>org.freedesktop.systemd1.manage-units</code><code>unit=bluetooth.service</code><code>verb=restart</code></div>
+      </div>
+      <div class="sec auth">
+        <div class="field">
+          <span class="st st-touch"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" class="pulse" aria-hidden="true"><path d="M4 12.5c.8-1.2 1.2-2.7 1.2-4.5a2.8 2.8 0 0 1 5.6 0c0 1.1-.1 2.2-.4 3.2M8 8c0 2.2-.6 4.2-1.8 5.8M3 9.5c.3-.6.4-1 .4-1.5a4.6 4.6 0 0 1 9.2 0c0 1.9-.3 3.6-.9 5.1"/></svg><span class="ph">Touch the fingerprint reader</span></span>
+          <span class="st st-rest st-typing st-wrong"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg></span>
+          <span class="st st-rest"><span class="ph">Password for habibe</span></span>
+          <span class="st st-typing"><span class="dots">••••••••••</span><span class="caret"></span></span>
+          <span class="st st-checking"><span class="spin" aria-hidden="true"></span><span class="ph">Checking…</span></span>
+          <span class="st st-wrong"><span class="ph">Wrong password · 2 tries left</span></span>
+        </div>
+        <div class="keys"><span><kbd>Esc</kbd> Deny</span><span class="primary"><kbd>↵</kbd> Restart</span></div>
+      </div>
+    </div>
+  </div>
+  <aside class="margin">
+    <h4>Where each line comes from</h4>
+    <ul>
+      <li><span class="src">polkit</span>the action and its details (<code>unit</code>, <code>verb</code>), set by systemd itself</li>
+      <li><span class="src">systemd</span>current state and drop-ins, read over D-Bus</li>
+      <li><span class="src claim">agent</span>the quoted reason only</li>
+    </ul>
+    <p>No pkexec here: systemctl asks polkit directly, so the preview reads systemd's own details instead of a command line.</p>
+  </aside>
+</section>
+
+<footer>
+  <p>Anything bb-auth can't interpret gets the plain screen: the requester, the polkit message, and the exact command open by default.</p>
+  <p>Mockup. The real sheet is Quickshell (habibe.bb-auth), drawn from Omarchy's palette and the omafire tokens; sizes, copy and examples here are illustrative.</p>
+</footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var page = document.getElementById("page");
+  function wire(selector, attr, apply) {
+    var buttons = document.querySelectorAll(selector);
+    buttons.forEach(function (b) {
+      b.addEventListener("click", function () {
+        buttons.forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
+        apply(b.getAttribute(attr));
+      });
+    });
+  }
+  wire("[data-palette]", "data-palette", function (p) {
+    if (p === "current") root.removeAttribute("data-palette"); else root.setAttribute("data-palette", p);
+  });
+  wire("button[data-state]", "data-state", function (s) {
+    page.setAttribute("data-state", "rest");
+    requestAnimationFrame(function () { page.setAttribute("data-state", s); });
+  });
+  document.querySelectorAll(".disclose").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var open = b.getAttribute("aria-expanded") !== "true";
+      b.setAttribute("aria-expanded", String(open));
+      document.getElementById(b.getAttribute("aria-controls")).hidden = !open;
+    });
+  });
+})();
+</script>

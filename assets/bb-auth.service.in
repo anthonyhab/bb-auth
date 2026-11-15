@@ -13,7 +13,9 @@ TimeoutStopSec=5sec
 Restart=on-failure
 
 # Security hardening
-PrivateTmp=yes
+# No PrivateTmp: the daemon launches the prompt, which inherits its mounts, and
+# the prompt's previews must see the /tmp the requester sees (agents work
+# there). They only read, so ProtectSystem's read-only view is no obstacle.
 ProtectSystem=strict
 NoNewPrivileges=true
 CapabilityBoundingSet=

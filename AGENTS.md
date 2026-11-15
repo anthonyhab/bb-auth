@@ -15,15 +15,6 @@ Compact guide for coding agents in this repo.
 3. `README.md` (user-facing behavior)
 4. `lat.md/` (knowledge graph — `lat search` for relevant sections)
 
-## Repo Map
-
-- `src/core/`: daemon, session, provider orchestration, IPC
-- `src/fallback/`: built-in Qt fallback UI
-- `src/modes/`: daemon/keyring/pinentry entry paths
-- `tests/`: Qt tests and protocol/conformance checks
-- `examples/provider-template/`: external provider template
-- `docs/`: contract, packaging, troubleshooting, workflow
-
 ## One Command Before Main
 
 ```bash
@@ -42,16 +33,6 @@ Useful variants:
 ./scripts/gate-local.sh --aur-smoke
 STRICT_DAEMON_SMOKE=1 ./scripts/gate-local.sh
 ```
-
-## Change Rules
-
-For non-trivial changes:
-
-1. State acceptance criteria.
-2. Implement smallest coherent slice.
-3. Add/update tests.
-4. Run local gates.
-5. Update docs if behavior changed.
 
 ## Hard Boundaries
 

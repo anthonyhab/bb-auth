@@ -114,13 +114,13 @@ class HookCase(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         out = json.loads(proc.stdout)
         self.assertEqual(
-            out["hookSpecificOutput"]["updatedInput"]["command"], "pkexec pacman -Sc")
+            out["hookSpecificOutput"]["updatedInput"]["command"], "pkexec --keep-cwd pacman -Sc")
         self.assertEqual(len(self.declared()), 1)
         d = self.declared()[0]
         self.assertEqual(d["agent"], "claude-code")
         self.assertEqual(d["channel"], "hook")
         self.assertEqual(d["reason"], "cleaning the pacman cache")
-        self.assertEqual(d["command"], "pkexec pacman -Sc")
+        self.assertEqual(d["command"], "pkexec --keep-cwd pacman -Sc")
 
     def test_devin_exec_rewrite(self):
         proc = self.invoke({
@@ -131,7 +131,7 @@ class HookCase(unittest.TestCase):
         out = json.loads(proc.stdout)
         self.assertEqual(
             out["hookSpecificOutput"]["updatedInput"]["command"],
-            "pkexec rm -f /tmp/stale")
+            "pkexec --keep-cwd rm -f /tmp/stale")
         self.assertEqual(self.declared()[0]["agent"], "devin")
         self.assertEqual(self.declared()[0]["reason"], "(no rationale captured)")
 
@@ -152,7 +152,7 @@ class HookCase(unittest.TestCase):
         out = json.loads(proc.stdout)
         hook = out["hookSpecificOutput"]
         self.assertEqual(hook["permissionDecision"], "allow")
-        self.assertEqual(hook["updatedInput"]["command"], "pkexec pacman -Sc")
+        self.assertEqual(hook["updatedInput"]["command"], "pkexec --keep-cwd pacman -Sc")
         self.assertEqual(self.declared()[0]["agent"], "codex")
 
     def test_codex_exec_command_via_matcher_alias(self):
@@ -168,7 +168,7 @@ class HookCase(unittest.TestCase):
         out = json.loads(proc.stdout)
         self.assertEqual(
             out["hookSpecificOutput"]["updatedInput"]["command"],
-            "pkexec dmesg --clear")
+            "pkexec --keep-cwd dmesg --clear")
         self.assertEqual(self.declared()[0]["agent"], "codex")
 
     def test_claude_bash_without_turn_id_stays_claude(self):
@@ -192,7 +192,7 @@ class HookCase(unittest.TestCase):
         # Gemini merges hookSpecificOutput.tool_input, not updatedInput.
         self.assertEqual(
             out["hookSpecificOutput"]["tool_input"]["command"],
-            "pkexec dmesg --clear")
+            "pkexec --keep-cwd dmesg --clear")
         self.assertEqual(self.declared()[0]["agent"], "gemini-cli")
 
     def test_unknown_tool_declares_but_does_not_rewrite(self):
@@ -235,8 +235,8 @@ class HookCase(unittest.TestCase):
         out = json.loads(proc.stdout)
         self.assertEqual(
             out["hookSpecificOutput"]["updatedInput"]["command"],
-            "pkexec make install")
-        self.assertEqual(self.declared()[0]["command"], "pkexec make install")
+            "pkexec --keep-cwd make install")
+        self.assertEqual(self.declared()[0]["command"], "pkexec --keep-cwd make install")
 
     def test_sudo_user_flag_maps_to_pkexec(self):
         proc = self.invoke({
@@ -247,7 +247,7 @@ class HookCase(unittest.TestCase):
         out = json.loads(proc.stdout)
         self.assertEqual(
             out["hookSpecificOutput"]["updatedInput"]["command"],
-            "pkexec --user nobody id")
+            "pkexec --keep-cwd --user nobody id")
 
     def test_probe_only_sudo_declares_without_rewrite(self):
         proc = self.invoke({
@@ -328,11 +328,11 @@ class HookCase(unittest.TestCase):
                       "run_in_background": True, "description": "clean cache"}
         proc = self.invoke({"tool_name": "Bash", "tool_input": tool_input})
         self.assertEqual(json.loads(proc.stdout)["hookSpecificOutput"]["updatedInput"],
-                         {**tool_input, "command": "pkexec pacman -Sc"})
+                         {**tool_input, "command": "pkexec --keep-cwd pacman -Sc"})
         gem = self.invoke({"tool_name": "run_shell_command",
                            "tool_input": {"command": "sudo id", "dir_path": "/tmp"}})
         self.assertEqual(json.loads(gem.stdout)["hookSpecificOutput"]["tool_input"],
-                         {"command": "pkexec id", "dir_path": "/tmp"})
+                         {"command": "pkexec --keep-cwd id", "dir_path": "/tmp"})
 
     def test_rewrite_carries_handoff_context(self):
         proc = self.invoke({"tool_name": "Bash",

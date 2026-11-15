@@ -15,7 +15,7 @@ auto-detects the harness from the payload. It does two display/audit-only things
    transcript). The daemon attributes the request from process ancestry and
    shows the reason at the prompt.
 2. **Routes `sudo` → `pkexec`.** A *simple* leading `sudo CMD` is rewritten to
-   `pkexec CMD` via the harness's tool-input merge channel, so the escalation
+   `pkexec --keep-cwd CMD` via the harness's tool-input merge channel, so the escalation
    goes through bb-auth's polkit prompt — attributed and human-supervised —
    rather than sudo's PAM path, which bb-auth never sees.
 
